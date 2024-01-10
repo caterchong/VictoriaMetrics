@@ -25,6 +25,11 @@ func Less(a, b []byte) bool {
 	return string(a[:minLen]) < string(b[:minLen])
 }
 
+func LessEqual(a, b []byte) bool {
+	minLen := minValue(len(a), len(b))
+	return string(a[:minLen]) <= string(b[:minLen])
+}
+
 type IterateContext struct {
 	PartHeader       partHeader
 	MetaIndexBin     []byte
@@ -86,6 +91,10 @@ func IterateAllIndexesFromPartDir(ctx *IterateContext, partDir string, prefix []
 		if len(prefix) > 0 && Less(prefix, row.firstItem) {
 			continue
 		}
+		if len(prefix) > 0 && len(row.firstItem) >= len(prefix) &&
+			string(row.firstItem[:len(prefix)]) > string(prefix) {
+			break
+		}
 		if cap(ctx.IndexBlockBuf) < int(row.indexBlockSize) {
 			ctx.IndexBlockBuf = make([]byte, int(row.indexBlockSize), int(row.indexBlockSize)*2)
 		} else {
@@ -116,12 +125,21 @@ func IterateAllIndexesFromPartDir(ctx *IterateContext, partDir string, prefix []
 			if len(prefix) > 0 && Less(prefix, bh.firstItem) {
 				continue
 			}
+			if len(prefix) > 0 && len(bh.firstItem) >= len(prefix) &&
+				string(bh.firstItem[:len(prefix)]) > string(prefix) {
+				break
+			}
 			ctx.StorageBlock.Reset()
-			ctx.StorageBlock.itemsData = bytesutil.ResizeNoCopyMayOverallocate(ctx.StorageBlock.itemsData, int(bh.itemsBlockSize))
-			itemsFile.MustReadAt(ctx.StorageBlock.itemsData, int64(bh.itemsBlockOffset))
 
-			ctx.StorageBlock.lensData = bytesutil.ResizeNoCopyMayOverallocate(ctx.StorageBlock.lensData, int(bh.lensBlockSize))
-			lensFile.MustReadAt(ctx.StorageBlock.lensData, int64(bh.lensBlockOffset))
+			if fs.IsDisableMmap() {
+				ctx.StorageBlock.itemsData = bytesutil.ResizeNoCopyMayOverallocate(ctx.StorageBlock.itemsData, int(bh.itemsBlockSize))
+				itemsFile.MustReadAt(ctx.StorageBlock.itemsData, int64(bh.itemsBlockOffset))
+				ctx.StorageBlock.lensData = bytesutil.ResizeNoCopyMayOverallocate(ctx.StorageBlock.lensData, int(bh.lensBlockSize))
+				lensFile.MustReadAt(ctx.StorageBlock.lensData, int64(bh.lensBlockOffset))
+			} else {
+				ctx.StorageBlock.itemsData = itemsFile.ReadByOffset(int64(bh.itemsBlockOffset), int64(bh.itemsBlockSize))
+				ctx.StorageBlock.lensData = lensFile.ReadByOffset(int64(bh.lensBlockOffset), int64(bh.lensBlockSize))
+			}
 
 			ctx.InmemoryBlock.Reset()
 			if err = ctx.InmemoryBlock.UnmarshalData(&ctx.StorageBlock, bh.firstItem, bh.commonPrefix, bh.itemsCount, bh.marshalType); err != nil {
@@ -130,7 +148,12 @@ func IterateAllIndexesFromPartDir(ctx *IterateContext, partDir string, prefix []
 			}
 			// todo: 这里缓存 ib 对象
 			for _, idx := range ctx.InmemoryBlock.items { // ib.items 是排序的
-				if callback(idx.Bytes(ctx.InmemoryBlock.data)) {
+				data := idx.Bytes(ctx.InmemoryBlock.data)
+				if len(prefix) > 0 && len(data) >= len(prefix) &&
+					string(data[:len(prefix)]) > string(prefix) {
+					break
+				}
+				if callback(data) {
 					isStop = true
 					return
 				}
