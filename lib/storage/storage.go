@@ -2646,7 +2646,7 @@ func (s *Storage) putTSIDToCache(tsid *generationTSID, metricName []byte) {
 	s.tsidCache.Set(metricName, buf)
 }
 
-func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB) {
+func GetIndexDBTableNames(path string) (nextPath, currPath, prevPath string) {
 	fs.MustMkdirIfNotExist(path)
 	fs.MustRemoveTemporaryDirs(path)
 
@@ -2695,9 +2695,14 @@ func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB)
 	}
 
 	// Open tables
-	nextPath := filepath.Join(path, tableNames[2])
-	currPath := filepath.Join(path, tableNames[1])
-	prevPath := filepath.Join(path, tableNames[0])
+	nextPath = filepath.Join(path, tableNames[2])
+	currPath = filepath.Join(path, tableNames[1])
+	prevPath = filepath.Join(path, tableNames[0])
+	return
+}
+
+func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB) {
+	nextPath, currPath, prevPath := GetIndexDBTableNames(path)
 
 	next = mustOpenIndexDB(nextPath, s, &s.isReadOnly)
 	curr = mustOpenIndexDB(currPath, s, &s.isReadOnly)

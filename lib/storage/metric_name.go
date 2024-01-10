@@ -414,6 +414,25 @@ func (mn *MetricName) String() string {
 	return fmt.Sprintf("AccountID=%d, ProjectID=%d, %s{%s}", mnCopy.AccountID, mnCopy.ProjectID, mnCopy.MetricGroup, tagsStr)
 }
 
+func (mn *MetricName) MarshalToMetricText(dst []byte) []byte {
+	dst = append(dst, mn.MetricGroup...)
+	dst = append(dst, '{')
+	isFirst := true
+	for _, tag := range mn.Tags {
+		if isFirst {
+			isFirst = false
+		} else {
+			dst = append(dst, ',')
+		}
+		dst = append(dst, tag.Key...)
+		dst = append(dst, '=', '"')
+		dst = append(dst, tag.Value...)
+		dst = append(dst, '"')
+	}
+	dst = append(dst, '}', '\n')
+	return dst
+}
+
 // Marshal appends marshaled mn to dst and returns the result.
 //
 // mn.sortTags must be called before calling this function

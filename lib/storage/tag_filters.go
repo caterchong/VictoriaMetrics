@@ -151,7 +151,7 @@ func NewTagFilters(accountID, projectID uint32) *TagFilters {
 	return &TagFilters{
 		accountID:    accountID,
 		projectID:    projectID,
-		commonPrefix: marshalCommonPrefix(nil, nsPrefixTagToMetricIDs, accountID, projectID),
+		commonPrefix: marshalCommonPrefix(nil, NsPrefixTagToMetricIDs, accountID, projectID),
 	}
 }
 
@@ -231,7 +231,7 @@ func (tfs *TagFilters) Reset(accountID, projectID uint32) {
 	tfs.accountID = accountID
 	tfs.projectID = projectID
 	tfs.tfs = tfs.tfs[:0]
-	tfs.commonPrefix = marshalCommonPrefix(tfs.commonPrefix[:0], nsPrefixTagToMetricIDs, accountID, projectID)
+	tfs.commonPrefix = marshalCommonPrefix(tfs.commonPrefix[:0], NsPrefixTagToMetricIDs, accountID, projectID)
 }
 
 // tagFilter represents a filter used for filtering tags.

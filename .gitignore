@@ -22,3 +22,6 @@ Gemfile.lock
 /_site
 _site
 *.tmp
+test/
+app/vmfile/*.txt
+app/vmfile/Makefile
