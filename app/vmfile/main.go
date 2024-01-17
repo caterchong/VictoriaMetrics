@@ -1,19 +1,16 @@
 package main
 
 import (
-	"bufio"
 	"flag"
-	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"runtime/pprof"
 
-	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/metricidset"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/countdata"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/countindex"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/exportmetrics"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/reindex"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
 )
 
 var (
@@ -22,6 +19,8 @@ var (
 	output          = flag.String("output", "", "output file path")
 	indexTableFlag  = flag.Int("index_table_flag", 3, "bit 0:curr, bit 1:prev")
 	cpuProfile      = flag.String("cpuprofile", "", "if set, app will output a cpu.prof file")
+	accountID       = flag.Int("account_id", 0, "tenant account id")
+	projectID       = flag.Int("project_id", 0, "tenant project id")
 )
 
 func main() {
@@ -43,56 +42,16 @@ func main() {
 	//
 	switch *action {
 	case "export_metrics":
-		exportMetricsToFile()
+		exportmetrics.ExportMetricsToFile(*storageDataPath, int8(*indexTableFlag), *output)
+	case "export_metrics_by_tenant":
+		exportmetrics.ExportMetricsToFileByTenant(*storageDataPath, int8(*indexTableFlag), *output, uint32(*accountID), uint32(*projectID))
+	case "count_index":
+		countindex.CountIndex(*storageDataPath, int8(*indexTableFlag))
+	case "reindex":
+		reindex.Reindex(*storageDataPath, int8(*indexTableFlag), *output)
+	case "count_data":
+		countdata.CountData(*storageDataPath, 3)
 	default:
 		logger.Panicf("unknown action:%s", *action)
 	}
-}
-
-func exportMetricsToFile() {
-	if !fs.IsPathExist(*storageDataPath) {
-		logger.Panicf("storageDataPath [%s] not exists", *storageDataPath)
-	}
-	outputDir := filepath.Dir(*output)
-	if !fs.IsPathExist(outputDir) {
-		logger.Panicf("output dir [%s] not exists", outputDir)
-	}
-	if *indexTableFlag < 1 || *indexTableFlag > 3 {
-		logger.Panicf("index_table_flag=%d, must 1~3", *indexTableFlag)
-	}
-	//
-	outputFile, err := os.Create(*output)
-	if err != nil {
-		logger.Panicf("create file %s error, err=%w", *output, err)
-	}
-	defer outputFile.Close()
-	writer := bufio.NewWriter(outputFile)
-	defer writer.Flush()
-	var mn storage.MetricName
-	metricText := make([]byte, 0, 1024)
-	metricIDSet := metricidset.NewMetricIDSet()
-	indexPrefix := [1]byte{storage.NsPrefixMetricIDToMetricName}
-	var cnt uint64
-	err = storage.IterateAllIndexes(*storageDataPath, indexPrefix[:], int8(*indexTableFlag), func(data []byte) (isStop bool) {
-		if data[0] == storage.NsPrefixMetricIDToMetricName {
-			accountID := encoding.UnmarshalUint32(data[1:])
-			projectID := encoding.UnmarshalUint32(data[5:])
-			metricID := encoding.UnmarshalUint64(data[9:])
-			if metricIDSet.Add(accountID, projectID, metricID) {
-				return // 不添加重复的 metric
-			}
-			mn.Reset()
-			if err := mn.Unmarshal(data[17:]); err != nil {
-				logger.Panicf("mn.Unmarshal error, err=%w", err)
-			}
-			metricText = mn.MarshalToMetricText(metricText[:0])
-			writer.Write(metricText)
-			cnt++
-		}
-		return false
-	})
-	if err != nil {
-		logger.Panicf("storage.IterateAllIndexes error, err=%w", err)
-	}
-	fmt.Printf("ok, export %d metrics to file\n", cnt)
 }

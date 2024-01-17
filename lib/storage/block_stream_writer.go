@@ -27,7 +27,7 @@ type blockStreamWriter struct {
 	valuesBlockOffset     uint64
 	indexBlockOffset      uint64
 
-	indexData           []byte
+	indexData           []byte  // 这个是所有的 blockHeader 序列化后追加的内容
 	compressedIndexData []byte
 
 	metaindexData           []byte
@@ -130,10 +130,11 @@ func (bsw *blockStreamWriter) MustClose() {
 	bsw.reset()
 }
 
-// WriteExternalBlock writes b to bsw and updates ph and rowsMerged.
+// WriteExternalBlock writes b to bsw and updates ph and rowsMerged.  // 顺序是如何组织的?
 func (bsw *blockStreamWriter) WriteExternalBlock(b *Block, ph *partHeader, rowsMerged *uint64) {
 	atomic.AddUint64(rowsMerged, uint64(b.rowsCount()))
 	b.deduplicateSamplesDuringMerge()
+	// headerData 是 blockHeader 序列化以后的内容
 	headerData, timestampsData, valuesData := b.MarshalData(bsw.timestampsBlockOffset, bsw.valuesBlockOffset)
 	usePrevTimestamps := len(bsw.prevTimestampsData) > 0 && bytes.Equal(timestampsData, bsw.prevTimestampsData)
 	if usePrevTimestamps {
@@ -145,7 +146,7 @@ func (bsw *blockStreamWriter) WriteExternalBlock(b *Block, ph *partHeader, rowsM
 	}
 	bsw.indexData = append(bsw.indexData, headerData...)
 	bsw.mr.RegisterBlockHeader(&b.bh)
-	if len(bsw.indexData) >= maxBlockSize {
+	if len(bsw.indexData) >= maxBlockSize {  // blockHeader 序列化后的长度超过 64 kb 后，产生一个新的 metaIndexRow
 		bsw.flushIndexData()
 	}
 	if !usePrevTimestamps {
@@ -175,7 +176,7 @@ func updatePartHeader(b *Block, ph *partHeader) {
 	}
 }
 
-func (bsw *blockStreamWriter) flushIndexData() {
+func (bsw *blockStreamWriter) flushIndexData() {  // 产生一个新的 metaindexRow
 	if len(bsw.indexData) == 0 {
 		return
 	}
@@ -183,7 +184,7 @@ func (bsw *blockStreamWriter) flushIndexData() {
 	// Write compressed index block to index data.
 	bsw.compressedIndexData = encoding.CompressZSTDLevel(bsw.compressedIndexData[:0], bsw.indexData, bsw.compressLevel)
 	indexBlockSize := len(bsw.compressedIndexData)
-	if uint64(indexBlockSize) >= 1<<32 {
+	if uint64(indexBlockSize) >= 1<<32 {  //todo: 这个判断完全没必要
 		logger.Panicf("BUG: indexBlock size must fit uint32; got %d", indexBlockSize)
 	}
 	fs.MustWriteData(bsw.indexWriter, bsw.compressedIndexData)

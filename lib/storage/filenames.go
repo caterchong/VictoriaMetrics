@@ -16,7 +16,7 @@ const (
 	smallDirname = "small"
 	bigDirname   = "big"
 
-	indexdbDirname   = "indexdb"
+	IndexdbDirname   = "indexdb"
 	dataDirname      = "data"
 	metadataDirname  = "metadata"
 	snapshotsDirname = "snapshots"

@@ -5,8 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/decimal"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 )
 
@@ -385,4 +387,14 @@ func (b *Block) UnmarshalPortable(src []byte) ([]byte, error) {
 	}
 
 	return src, nil
+}
+
+func LoadBlockFromFile(bh *blockHeader, timestampsFile fs.MustReadAtCloser, valuesFile fs.MustReadAtCloser) *Block {
+	b := getBlock()
+	b.Init(&bh.TSID, nil, nil, bh.Scale, bh.PrecisionBits)
+	b.timestampsData = bytesutil.ResizeNoCopyMayOverallocate(b.timestampsData, int(bh.TimestampsBlockSize))
+	timestampsFile.MustReadAt(b.timestampsData, int64(bh.TimestampsBlockOffset))
+	b.valuesData = bytesutil.ResizeNoCopyMayOverallocate(b.valuesData, int(bh.ValuesBlockSize))
+	valuesFile.MustReadAt(b.valuesData, int64(bh.ValuesBlockOffset))
+	return b
 }

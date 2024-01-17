@@ -52,3 +52,13 @@ func (c *MetricIDSet) Has(accountID, projectID uint32, metricID uint64) (exists 
 	exists = s.Has(metricID)
 	return
 }
+
+func (c *MetricIDSet) Len() int {
+	l := c.DefaultTenant.Len()
+	for _, item := range c.Tenants {
+		for _, m := range item {
+			l += m.Len()
+		}
+	}
+	return l
+}

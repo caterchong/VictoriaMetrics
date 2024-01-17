@@ -78,6 +78,10 @@ func (t *TSID) Marshal(dst []byte) []byte {
 	return dst
 }
 
+func (t *TSID) MarshalLen() int {
+	return 4 + 4 + 8 + 4 + 4 + 8
+}
+
 // Unmarshal unmarshals t from src and returns the rest of src.
 func (t *TSID) Unmarshal(src []byte) ([]byte, error) {
 	if len(src) < marshaledTSIDSize {

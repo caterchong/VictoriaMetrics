@@ -234,12 +234,12 @@ func MustOpenStorage(path string, retention time.Duration, maxHourlySeries, maxD
 
 	// Load metadata
 	metadataDir := filepath.Join(path, metadataDirname)
-	isEmptyDB := !fs.IsPathExist(filepath.Join(path, indexdbDirname))
+	isEmptyDB := !fs.IsPathExist(filepath.Join(path, IndexdbDirname))
 	fs.MustMkdirIfNotExist(metadataDir)
 	s.minTimestampForCompositeIndex = mustGetMinTimestampForCompositeIndex(metadataDir, isEmptyDB)
 
 	// Load indexdb
-	idbPath := filepath.Join(path, indexdbDirname)
+	idbPath := filepath.Join(path, IndexdbDirname)
 	idbSnapshotsPath := filepath.Join(idbPath, snapshotsDirname)
 	fs.MustMkdirIfNotExist(idbSnapshotsPath)
 	fs.MustRemoveTemporaryDirs(idbSnapshotsPath)
@@ -385,7 +385,7 @@ func (s *Storage) CreateSnapshot(deadline uint64) (string, error) {
 	dstMetadataDir := filepath.Join(dstDir, metadataDirname)
 	fs.MustCopyDirectory(srcMetadataDir, dstMetadataDir)
 
-	idbSnapshot := filepath.Join(srcDir, indexdbDirname, snapshotsDirname, snapshotName)
+	idbSnapshot := filepath.Join(srcDir, IndexdbDirname, snapshotsDirname, snapshotName)
 	idb := s.idb()
 	currSnapshot := filepath.Join(idbSnapshot, idb.name)
 	if err := idb.tb.CreateSnapshotAt(currSnapshot, deadline); err != nil {
@@ -400,7 +400,7 @@ func (s *Storage) CreateSnapshot(deadline uint64) (string, error) {
 	if ok && err != nil {
 		return "", fmt.Errorf("cannot create prev indexDB snapshot: %w", err)
 	}
-	dstIdbDir := filepath.Join(dstDir, indexdbDirname)
+	dstIdbDir := filepath.Join(dstDir, IndexdbDirname)
 	fs.MustSymlinkRelative(idbSnapshot, dstIdbDir)
 
 	fs.MustSyncPath(dstDir)
@@ -445,7 +445,7 @@ func (s *Storage) DeleteSnapshot(snapshotName string) error {
 	startTime := time.Now()
 
 	s.tb.MustDeleteSnapshot(snapshotName)
-	idbPath := filepath.Join(s.path, indexdbDirname, snapshotsDirname, snapshotName)
+	idbPath := filepath.Join(s.path, IndexdbDirname, snapshotsDirname, snapshotName)
 	fs.MustRemoveDirAtomic(idbPath)
 	fs.MustRemoveDirAtomic(snapshotPath)
 
@@ -768,7 +768,7 @@ func (s *Storage) nextDayMetricIDsUpdater() {
 func (s *Storage) mustRotateIndexDB(currentTime time.Time) {
 	// Create new indexdb table, which will be used as idbNext
 	newTableName := nextIndexDBTableName()
-	idbNewPath := filepath.Join(s.path, indexdbDirname, newTableName)
+	idbNewPath := filepath.Join(s.path, IndexdbDirname, newTableName)
 	idbNew := mustOpenIndexDB(idbNewPath, s, &s.isReadOnly)
 
 	// Update nextRotationTimestamp

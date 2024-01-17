@@ -43,7 +43,7 @@ func (mr *metaindexRow) Reset() {
 }
 
 // RegisterBlockHeader registers the given bh in the mr.
-func (mr *metaindexRow) RegisterBlockHeader(bh *blockHeader) {
+func (mr *metaindexRow) RegisterBlockHeader(bh *blockHeader) { // 追加了一个 block 后，在对应的 mr 上登记
 	mr.BlockHeadersCount++
 	if mr.BlockHeadersCount == 1 {
 		mr.TSID = bh.TSID
@@ -162,4 +162,18 @@ func unmarshalMetaindexRows(dst []metaindexRow, r io.Reader) ([]metaindexRow, er
 	}
 
 	return dst, nil
+}
+
+type MetaIndexRows []*metaindexRow
+
+func (arr MetaIndexRows) Len() int {
+	return len(arr)
+}
+
+func (arr MetaIndexRows) Less(i, j int) bool {
+	return arr[i].TSID.Less(&arr[j].TSID)
+}
+
+func (arr MetaIndexRows) Swap(i, j int) {
+	arr[i], arr[j] = arr[j], arr[i]
 }
