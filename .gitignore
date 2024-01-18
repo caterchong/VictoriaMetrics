@@ -26,3 +26,4 @@ test/
 app/vmfile/*.txt
 app/vmfile/Makefile
 app/vmfile/cpu.profile
+app/vmfile/test/

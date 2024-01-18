@@ -392,6 +392,7 @@ func (b *Block) UnmarshalPortable(src []byte) ([]byte, error) {
 func LoadBlockFromFile(bh *blockHeader, timestampsFile fs.MustReadAtCloser, valuesFile fs.MustReadAtCloser) *Block {
 	b := getBlock()
 	b.Init(&bh.TSID, nil, nil, bh.Scale, bh.PrecisionBits)
+	b.bh = *bh
 	b.timestampsData = bytesutil.ResizeNoCopyMayOverallocate(b.timestampsData, int(bh.TimestampsBlockSize))
 	timestampsFile.MustReadAt(b.timestampsData, int64(bh.TimestampsBlockOffset))
 	b.valuesData = bytesutil.ResizeNoCopyMayOverallocate(b.valuesData, int(bh.ValuesBlockSize))

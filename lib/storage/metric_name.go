@@ -42,7 +42,7 @@ func (tag *Tag) Equal(t *Tag) bool {
 
 // Marshal appends marshaled tag to dst and returns the result.
 func (tag *Tag) Marshal(dst []byte) []byte {
-	dst = marshalTagValue(dst, tag.Key)
+	dst = marshalTagValue(dst, tag.Key)  // 使用字符  \1 来分割
 	dst = marshalTagValue(dst, tag.Value)
 	return dst
 }
@@ -77,7 +77,7 @@ func marshalTagValue(dst, src []byte) []byte {
 	n2 := bytes.IndexByte(src, tagSeparatorChar)
 	n3 := bytes.IndexByte(src, kvSeparatorChar)
 	if n1 < 0 && n2 < 0 && n3 < 0 {
-		// Fast path.
+		// Fast path.  // 当 src =nil 时，走到这里
 		dst = append(dst, src...)
 		dst = append(dst, tagSeparatorChar)
 		return dst

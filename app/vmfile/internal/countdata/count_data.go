@@ -26,7 +26,7 @@ func CountData(storageDataPath string, dataPartitionFlag int8) {
 				storage.EachPart(partitionType, path, func(partitionType int8, path string) (isStop bool, err error) {
 					fmt.Printf("\t\tpart:%s\n", filepath.Base(path))
 					itemsCount, blocksCount, minTs, maxTs := storage.GetPartHeader(path)
-					fmt.Printf("\t\t\tcount=%d, blocks=%d, from %s to %s\n", itemsCount, blocksCount,
+					fmt.Printf("\t\t\trows count=%d, blocks=%d, from %s to %s\n", itemsCount, blocksCount,
 						time.UnixMilli(minTs).Format("2006-01-02 15:04:05"), time.UnixMilli(maxTs).Format("2006-01-02 15:04:05"))
 					//
 					if minTs < minTsGlobal {
@@ -74,9 +74,15 @@ func CountData(storageDataPath string, dataPartitionFlag int8) {
 	fmt.Printf("total items count:%d\n", totalItemsCount)
 	fmt.Printf("total blocks count:%d\n", totalBlockCount)
 	fmt.Printf("total metric id count:%d\n", metricIDSet.Len())
+	fmt.Printf("metric id map len:%d\n", len(metricIDs))
 	fmt.Printf("\tfrom %s to %s\n", time.UnixMilli(minTsGlobal).Format("2006-01-02 15:04:05"), time.UnixMilli(maxTsGlobal).Format("2006-01-02 15:04:05"))
 	//fmt.Printf("\n\t%+v\n", metricIDs)
-	fmt.Printf("metric id map len:%d\n", len(metricIDs))
 	fmt.Printf("row count:%d\n", totalRowCount)
+	if metricIDSet.Len() != len(metricIDs) {
+		logger.Panicf("metric id count error")
+	}
+	if totalItemsCount != totalRowCount {
+		logger.Panicf("rows count error")
+	}
 	fmt.Println("ok")
 }

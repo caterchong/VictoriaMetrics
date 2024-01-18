@@ -5,7 +5,7 @@ const (
 	indexFilename      = "index.bin"
 	valuesFilename     = "values.bin"
 	timestampsFilename = "timestamps.bin"
-	partsFilename      = "parts.json"
+	PartsFilename      = "parts.json"
 	metadataFilename   = "metadata.json"
 
 	appliedRetentionFilename    = "appliedRetention.txt"
@@ -17,8 +17,9 @@ const (
 	bigDirname   = "big"
 
 	IndexdbDirname   = "indexdb"
-	dataDirname      = "data"
+	DataDirname      = "data"
 	metadataDirname  = "metadata"
 	snapshotsDirname = "snapshots"
 	cacheDirname     = "cache"
+	TempName         = ".must-remove."
 )

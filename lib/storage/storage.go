@@ -279,7 +279,7 @@ func MustOpenStorage(path string, retention time.Duration, maxHourlySeries, maxD
 	s.startFreeDiskSpaceWatcher()
 
 	// Load data
-	tablePath := filepath.Join(path, dataDirname)
+	tablePath := filepath.Join(path, DataDirname)
 	tb := mustOpenTable(tablePath, s)
 	s.tb = tb
 
@@ -370,7 +370,7 @@ func (s *Storage) CreateSnapshot(deadline uint64) (string, error) {
 	}
 	dirsToRemoveOnError = append(dirsToRemoveOnError, smallDir, bigDir)
 
-	dstDataDir := filepath.Join(dstDir, dataDirname)
+	dstDataDir := filepath.Join(dstDir, DataDirname)
 	fs.MustMkdirFailIfExist(dstDataDir)
 
 	dstSmallDir := filepath.Join(dstDataDir, smallDirname)

@@ -1,6 +1,7 @@
 package reindex
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,7 +59,7 @@ func Reindex(storageDataPath string, indexTableFlag int8, outputDir string) {
 	defer writer.Close()
 	//
 	if indexTableFlag == 3 {
-		curTableMetricID := getAllMetricIDOfCurrentTable(storageDataPath)
+		curTableMetricID := GetAllMetricIDOfCurrentTable(storageDataPath) // 得到 current 分区的所有 id
 		callback := func(
 			tableType int,
 			partDir string,
@@ -77,6 +78,8 @@ func Reindex(storageDataPath string, indexTableFlag int8, outputDir string) {
 					return false
 				}
 				// todo: 除了上面的两种索引，其他索引都有重复的可能，需要做一个去重的功能
+				//case storage.NsPrefixTagToMetricIDs: // tag -> metric id
+				//	showTagIndex(data, tableType, curTableMetricID)
 			}
 			writer.Write(data)
 			return false
@@ -99,6 +102,28 @@ func Reindex(storageDataPath string, indexTableFlag int8, outputDir string) {
 		logger.Panicf("storage.IterateAllIndexes error, err=%w", err)
 	}
 	fmt.Printf("ok\n")
+}
+
+func showTagIndex(data []byte, tableType int, curTableMetricID *metricidset.MetricIDSet) {
+	t := TagIndex{}
+	err := ParseTagIndex(data, &t)
+	if err != nil {
+		fmt.Printf("\n\n%X\n\n", data)
+		logger.Panicf("tag index format error, err=%w", err)
+	}
+	if tableType != storage.IndexTableFlagOfPrev {
+		return
+	}
+	// todo: 判断所有的 metrics id， 把重复的 metrics id 进行删除
+	if len(t.MetricGroupName) > 0 {
+		if len(t.Key) > 0 {
+			fmt.Printf("\t\t%s{%s=\"%s\"} %d(%d)\n", string(t.MetricGroupName), string(t.Key), string(t.Value), t.MetricIDs[0], len(t.MetricIDs))
+		} else {
+			fmt.Printf("\t\t%s{} %d(%d)\n", string(t.MetricGroupName), t.MetricIDs[0], len(t.MetricIDs))
+		}
+	} else {
+		fmt.Printf("\t\t{%s=\"%s\"} %d(%d)\n", string(t.Key), string(t.Value), t.MetricIDs[0], len(t.MetricIDs))
+	}
 }
 
 func MustRemoveAllExcept(dir string, names []string) {
@@ -129,7 +154,7 @@ func MustRemoveAllExcept(dir string, names []string) {
 func getDifferenceSetOfMetricID(storageDataPath string) *metricidset.MetricIDSet {
 	notInCurr := metricidset.NewMetricIDSet()
 	//
-	metricIDSet := getAllMetricIDOfCurrentTable(storageDataPath)
+	metricIDSet := GetAllMetricIDOfCurrentTable(storageDataPath)
 	var prefix = [1]byte{storage.NsPrefixMetricIDToTSID}
 	callback := func(data []byte) (isStop bool) {
 		if data[0] != storage.NsPrefixMetricIDToTSID {
@@ -150,7 +175,7 @@ func getDifferenceSetOfMetricID(storageDataPath string) *metricidset.MetricIDSet
 	return notInCurr
 }
 
-func getAllMetricIDOfCurrentTable(storageDataPath string) *metricidset.MetricIDSet {
+func GetAllMetricIDOfCurrentTable(storageDataPath string) *metricidset.MetricIDSet {
 	metricIDSet := metricidset.NewMetricIDSet()
 	var prefix = [1]byte{storage.NsPrefixMetricIDToTSID}
 	callback := func(data []byte) (isStop bool) {
@@ -168,4 +193,81 @@ func getAllMetricIDOfCurrentTable(storageDataPath string) *metricidset.MetricIDS
 		logger.Panicf("storage.SearchIndexes error, err=%w", err)
 	}
 	return metricIDSet
+}
+
+type TagIndex struct {
+	AccountID       uint32
+	ProjectID       uint32
+	MetricIDs       []uint64
+	MetricGroupName []byte
+	Key             []byte
+	Value           []byte
+}
+
+func ParseTagIndex(data []byte, out *TagIndex) (err error) {
+	out.AccountID = encoding.UnmarshalUint32(data[1:])
+	out.ProjectID = encoding.UnmarshalUint32(data[5:])
+	data = data[9:]
+	switch data[0] {
+	case 1:
+		// metricGroupName -> metric id
+		data = data[1:]
+		idx := bytes.IndexByte(data, 1)
+		if idx < 0 {
+			err = fmt.Errorf("not found tag key(metricGroupName -> metric id)")
+			return
+		}
+		out.MetricGroupName = data[:idx]
+		data = data[idx+1:]
+	case 0xfe:
+		// metricGroupName + tag -> metric id
+		data = data[1:]
+		var nameLen uint64
+		data, nameLen, err = encoding.UnmarshalVarUint64(data)
+		if err != nil {
+			err = fmt.Errorf("name len error(index 3/fe), err=%w", err)
+			return
+		}
+		out.MetricGroupName = data[:nameLen]
+		data = data[nameLen:]
+		idx := bytes.IndexByte(data, 1)
+		if idx < 0 {
+			err = fmt.Errorf("not found tag key(index 3/fe)")
+			return
+		}
+		out.Key = data[:idx]
+		data = data[idx+1:]
+		idx = bytes.IndexByte(data, 1)
+		if idx < 0 {
+			err = fmt.Errorf("not found tag value(index 3/fe)")
+			return
+		}
+		out.Value = data[:idx]
+		data = data[idx+1:]
+	default:
+		// tag -> metric id
+		idx := bytes.IndexByte(data, 1)
+		if idx < 0 {
+			err = fmt.Errorf("not found tag key(index 3/)")
+			return
+		}
+		out.Key = data[:idx]
+		data = data[idx+1:]
+		idx = bytes.IndexByte(data, 1)
+		if idx < 0 {
+			err = fmt.Errorf("not found tag value(index 3/)")
+			return
+		}
+		out.Value = data[:idx]
+		data = data[idx+1:]
+	}
+	if len(data) < 8 || len(data)%8 != 0 {
+		err = fmt.Errorf("metric id format error(metricGroupName -> metric id)")
+		return
+	}
+	for len(data) > 0 {
+		out.MetricIDs = append(out.MetricIDs, encoding.UnmarshalUint64(data))
+		data = data[8:]
+	}
+	return
 }

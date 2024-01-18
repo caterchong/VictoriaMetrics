@@ -45,12 +45,15 @@ const (
 
 func (w *PartWriter) CreateNewPart(storageDataPath string, partitionName string,
 	monthlyPartitionName string, partName string) {
-	partDir := filepath.Join(storageDataPath, dataDirname, partitionName, monthlyPartitionName, partName)
+	partDir := filepath.Join(storageDataPath, DataDirname, partitionName, monthlyPartitionName, partName)
 	w.blockStreamWriter.MustInitFromFilePart(partDir, true, ZstdCompressLevelOfHighest)
 	w.partDir = partDir
 }
 
+var writedMetricID = map[uint64]struct{}{}
+
 func (w *PartWriter) WriteBlock(b *Block) {
+	writedMetricID[b.bh.TSID.MetricID] = struct{}{}
 	atomic.AddUint64(&w.rowsMerged, uint64(b.rowsCount()))
 	b.deduplicateSamplesDuringMerge()
 	_, timestampsData, valuesData :=
@@ -89,12 +92,14 @@ func (w *PartWriter) flushBlockHeaders() { // 产生一个新的 metaindexRow
 	if w.blockHeaderTotalLen == 0 {
 		return
 	}
+	w.blockHeaderTotalLen = 0
 	// 对 bhs 进行排序
 	sort.Sort(BlockHeaders(w.bhs))
 	w.blockStreamWriter.indexData = w.blockStreamWriter.indexData[:0]
 	for _, bh := range w.bhs {
 		w.blockStreamWriter.indexData = bh.Marshal(w.blockStreamWriter.indexData)
 	}
+	w.bhs = w.bhs[:0]
 	// Write compressed index block to index data.
 	w.blockStreamWriter.compressedIndexData = encoding.CompressZSTDLevel(
 		w.blockStreamWriter.compressedIndexData[:0], w.blockStreamWriter.indexData,
@@ -124,6 +129,7 @@ func (w *PartWriter) Close() {
 	for _, mr := range w.mrs {
 		w.blockStreamWriter.metaindexData = mr.Marshal(w.blockStreamWriter.metaindexData)
 	}
+	w.mrs = w.mrs[:0]
 	//
 	// Write metaindex data.
 	w.blockStreamWriter.compressedMetaindexData = encoding.CompressZSTDLevel(
@@ -199,7 +205,7 @@ type TsidDataInfo struct {
 	MetaIndexRowIndex    int
 	BlockIndex           int
 	BlockHeader          blockHeader
-	PartInstance         *part
+	//PartInstance         *part
 }
 
 type TsidDataMap struct {
@@ -209,6 +215,7 @@ type TsidDataMap struct {
 	indexBinContent []byte
 	zstdBuf         []byte
 	bhs             []blockHeader
+	parts           map[string]*part
 }
 
 func NewTsidDataMap() *TsidDataMap {
@@ -224,14 +231,44 @@ func (m *TsidDataMap) Reset() {
 	m.indexBinContent = m.indexBinContent[:0]
 	m.zstdBuf = m.zstdBuf[:0]
 	m.bhs = m.bhs[:0]
+	m.parts = make(map[string]*part)
+	//m.parts = m.parts[:0]
+}
+
+func (m *TsidDataMap) deref(mapOfMetrics map[uint64][]*TsidDataInfo) {
+	for k, arr := range mapOfMetrics {
+		for idx := range arr {
+			//item.PartInstance = nil
+			arr[idx] = nil
+		}
+		mapOfMetrics[k] = nil
+	}
+	//clear(mapOfMetrics)
+}
+
+func (m *TsidDataMap) Close() {
+	m.deref(m.DefaultTenant)
+	for _, m1 := range m.Tenants {
+		for _, m2 := range m1 {
+			m.deref(m2)
+		}
+	}
+	for name, part := range m.parts {
+		part.MustClose()
+		m.parts[name] = nil
+	}
+	m.parts = nil
+	logger.Infof("writedMetricID=%d, metricIDTotal=%d", len(writedMetricID), len(metricIDTotal))
 }
 
 func (m *TsidDataMap) ReadFromMonthlyPartitionDir(storagePath string, partitionName string, monthlyPartitionName string) (err error) {
-	monthlyDir := filepath.Join(storagePath, dataDirname, partitionName, monthlyPartitionName)
+	monthlyDir := filepath.Join(storagePath, DataDirname, partitionName, monthlyPartitionName)
 	if !fs.IsPathExist(monthlyDir) {
 		err = fmt.Errorf("dir [%s] not exists", monthlyDir)
+		logger.Errorf("monthlyDir [%s] not exists", monthlyDir)
 		return
 	}
+	//metricIDs := make(map[uint64]struct{}, 100000)
 	partNames := GetPartNames(monthlyDir)
 	// 遍历每个 part
 	//var zstdBuf []byte
@@ -239,10 +276,12 @@ func (m *TsidDataMap) ReadFromMonthlyPartitionDir(storagePath string, partitionN
 	for _, partName := range partNames {
 		partDir := filepath.Join(monthlyDir, partName)
 		partInst := mustOpenFilePart(partDir)
+		m.parts[partName] = partInst
 		m.indexBinContent, err = mergeset.ReadFile(m.indexBinContent[:0], filepath.Join(partDir, indexFilename))
 		//indexBinContent, err = os.ReadFile(filepath.Join(partDir, indexFilename))
 		if err != nil {
-			partInst.MustClose()
+			//partInst.MustClose()
+			logger.Errorf("read index.bin fail")
 			return
 		}
 		for i := range partInst.metaindex {
@@ -250,16 +289,23 @@ func (m *TsidDataMap) ReadFromMonthlyPartitionDir(storagePath string, partitionN
 			indexBlock := m.indexBinContent[row.IndexBlockOffset : row.IndexBlockOffset+uint64(row.IndexBlockSize)]
 			m.zstdBuf, err = encoding.DecompressZSTD(m.zstdBuf[:0], indexBlock)
 			if err != nil {
-				partInst.MustClose()
+				//partInst.MustClose()
+				logger.Errorf("DecompressZSTD index.bin error")
 				return
 			}
-			bhs, err := unmarshalBlockHeaders(m.bhs[:0], m.zstdBuf, int(row.BlockHeadersCount))
+			var bhs []blockHeader
+			bhs, err = unmarshalBlockHeaders(m.bhs[:0], m.zstdBuf, int(row.BlockHeadersCount))
 			if err != nil {
-				partInst.MustClose()
-				return err
+				//partInst.MustClose()
+				logger.Errorf("unmarshalBlockHeaders error, err=%w", err)
+				return
 			}
+			//m.parts = append(m.parts, partInst)
 			for j := range bhs {
 				block := &bhs[j]
+				if block.RowsCount == 0 || block.RowsCount > 65536*2 {
+					logger.Panicf("block row count error:%d", block.RowsCount)
+				}
 				// 建立索引
 				tenant := m.DefaultTenant
 				if block.TSID.AccountID != 0 || block.TSID.ProjectID != 0 {
@@ -278,7 +324,6 @@ func (m *TsidDataMap) ReadFromMonthlyPartitionDir(storagePath string, partitionN
 				metricInfo, ok := tenant[block.TSID.MetricID]
 				if !ok {
 					metricInfo = make([]*TsidDataInfo, 0, 10)
-
 				}
 				metricInfo = append(metricInfo, &TsidDataInfo{
 					PartitionName:        partitionName,
@@ -287,12 +332,16 @@ func (m *TsidDataMap) ReadFromMonthlyPartitionDir(storagePath string, partitionN
 					MetaIndexRowIndex:    i,
 					BlockIndex:           j,
 					BlockHeader:          *block, // 值类型，可以直接复制
-					PartInstance:         partInst,
+					//PartInstance:         partInst,
 				})
 				tenant[block.TSID.MetricID] = metricInfo
+				//metricIDs[block.TSID.MetricID] = struct{}{}
 			}
 		}
 	}
+	logger.Infof("default tenant:%d", len(m.DefaultTenant))
+	logger.Infof("tenant:%d", len(m.Tenants))
+	//logger.Infof("metricIDs:%d", len(metricIDs))
 	return
 }
 
@@ -318,6 +367,9 @@ func (arr TsidDataInfoArray) Len() int {
 func (arr TsidDataInfoArray) Less(i, j int) bool {
 	a := &arr[i].BlockHeader
 	b := &arr[j].BlockHeader
+	if a.Scale < b.Scale {
+		return true
+	}
 	if a.MaxTimestamp < b.MinTimestamp {
 		return true
 	}
@@ -328,21 +380,69 @@ func (arr TsidDataInfoArray) Swap(i, j int) {
 	arr[i], arr[j] = arr[j], arr[i]
 }
 
+func getByScale(arr []*TsidDataInfo, start int, scale int16) ([]*TsidDataInfo, int) {
+	for i := start; i < len(arr); i++ {
+		cur := arr[i]
+		if cur.BlockHeader.Scale != scale {
+			return arr[start:i], i
+		}
+	}
+	return arr[start:], len(arr)
+}
+
 func (m *TsidDataMap) MergeTsid(accountID, projectID uint32, metricID uint64, arr []*TsidDataInfo, writer *PartWriter) {
 	sort.Sort(TsidDataInfoArray(arr))
+	if len(arr) == 1 {
+		m.MergeTsidBySameScale(accountID, projectID, metricID, arr, writer)
+		return
+	}
+	curScale := arr[0].BlockHeader.Scale
+	start := 0
+	total := 0
+	for {
+		var temp []*TsidDataInfo
+		temp, start = getByScale(arr, start, curScale)
+		total += len(temp)
+		m.MergeTsidBySameScale(accountID, projectID, metricID, temp, writer)
+		if start >= len(arr) {
+			break
+		}
+		curScale = arr[start].BlockHeader.Scale
+	}
+	if total != len(arr) {
+		logger.Panicf("not all processed")
+	}
+}
+
+var metricIDTotal = map[uint64]struct{}{}
+
+func (m *TsidDataMap) MergeTsidBySameScale(accountID, projectID uint32, metricID uint64, arr []*TsidDataInfo, writer *PartWriter) {
+	metricIDTotal[metricID] = struct{}{}
 	//todo: 检查 Scale / PrecisionBits
 	//逐个遍历
 	target := getBlock()
 	defer putBlock(target)
+	//curScale := arr[0].BlockHeader.Scale
 	target.Init(&arr[0].BlockHeader.TSID, nil, nil, arr[0].BlockHeader.Scale, arr[0].BlockHeader.PrecisionBits)
 	var rowsDeleted uint64
 	i := 0
-	for ; i < len(arr)/2; i += 2 {
+	total := 0
+	for ; i < len(arr)-len(arr)%2; i += 2 {
 		b1 := arr[i]
+		if b1.BlockHeader.RowsCount == 0 || b1.BlockHeader.RowsCount > 65536*2 {
+			logger.Panicf("row count error:%d", b1.BlockHeader.RowsCount)
+		}
 		b2 := arr[i+1]
+		if b2.BlockHeader.RowsCount == 0 || b2.BlockHeader.RowsCount > 65536*2 {
+			logger.Panicf("row count error:%d", b2.BlockHeader.RowsCount)
+		}
+		partInst1 := m.parts[b1.PartName]
+		partInst2 := m.parts[b2.PartName]
 		//
-		a := LoadBlockFromFile(&b1.BlockHeader, b1.PartInstance.timestampsFile, b1.PartInstance.valuesFile)
-		b := LoadBlockFromFile(&b2.BlockHeader, b2.PartInstance.timestampsFile, b2.PartInstance.valuesFile)
+		a := LoadBlockFromFile(&b1.BlockHeader, partInst1.timestampsFile, partInst1.valuesFile)
+		//a.bh = b1.BlockHeader
+		b := LoadBlockFromFile(&b2.BlockHeader, partInst2.timestampsFile, partInst2.valuesFile)
+		//b.bh = b2.BlockHeader
 		var err error
 		err = a.UnmarshalData()
 		if err != nil {
@@ -361,22 +461,38 @@ func (m *TsidDataMap) MergeTsid(accountID, projectID uint32, metricID uint64, ar
 		}
 		putBlock(a)
 		putBlock(b)
+		total += 2
+	}
+	if len(target.values) > 0 {
+		writer.WriteBlock(target)
+		target.Reset()
 	}
 	if i >= len(arr) {
+		if total != len(arr) {
+			logger.Panicf("total=%d", total)
+		}
 		return
 	}
 	// 处理奇数块
 	for ; i < len(arr); i++ {
 		b1 := arr[i]
-		a := LoadBlockFromFile(&b1.BlockHeader, b1.PartInstance.timestampsFile, b1.PartInstance.valuesFile)
+		partInst1 := m.parts[b1.PartName]
+		a := LoadBlockFromFile(&b1.BlockHeader, partInst1.timestampsFile, partInst1.valuesFile)
 		var err error
 		err = a.UnmarshalData()
 		if err != nil {
 			logger.Panicf("block UnmarshalData error, err=%w", err)
 		}
-		writer.WriteBlock(target)
+		writer.WriteBlock(a)
 		putBlock(a)
+		total++
 		//writer.WriteRaw(&arr[i].BlockHeader, arr[i].PartInstance.timestampsFile.(*fs.ReaderAt), arr[i].PartInstance.valuesFile.(*fs.ReaderAt))
+	}
+	if rowsDeleted > 0 {
+		logger.Infof("rows deleted:%d", rowsDeleted)
+	}
+	if total != len(arr) {
+		logger.Panicf("total=%d", total)
 	}
 }
 

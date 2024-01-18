@@ -2830,34 +2830,34 @@ func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricNa
 
 	// Create per-day inverted index entries for metricID.
 	kb := kbPool.Get()
-	defer kbPool.Put(kb)
+	defer kbPool.Put(kb) // 0xfe
 	kb.B = marshalCommonPrefix(kb.B[:0], NsPrefixDateTagToMetricIDs, mn.AccountID, mn.ProjectID)
 	kb.B = encoding.MarshalUint64(kb.B, date)
 	ii.registerTagIndexes(kb.B, mn, tsid.MetricID)
 	is.db.tb.AddItems(ii.Items)
 }
 
-func (ii *indexItems) registerTagIndexes(prefix []byte, mn *MetricName, metricID uint64) {
+func (ii *indexItems) registerTagIndexes(prefix []byte, mn *MetricName, metricID uint64) { // 在 tag -> metric id 中调用了这个  // 三种索引
 	// Add index entry for MetricGroup -> MetricID
 	ii.B = append(ii.B, prefix...)
-	ii.B = marshalTagValue(ii.B, nil)
-	ii.B = marshalTagValue(ii.B, mn.MetricGroup)
-	ii.B = encoding.MarshalUint64(ii.B, metricID)
+	ii.B = marshalTagValue(ii.B, nil)             // 追加字符 tagSeparatorChar （1）
+	ii.B = marshalTagValue(ii.B, mn.MetricGroup)  // 追加 MetricGroup 和 1
+	ii.B = encoding.MarshalUint64(ii.B, metricID) // 追加 8 字节
 	ii.Next()
-	ii.addReverseMetricGroupIfNeeded(prefix, mn, metricID)
+	ii.addReverseMetricGroupIfNeeded(prefix, mn, metricID) // 如果 metric_name 中含有 .  则建立反向索引
 
 	// Add index entries for tags: tag -> MetricID
 	for _, tag := range mn.Tags {
 		ii.B = append(ii.B, prefix...)
-		ii.B = tag.Marshal(ii.B)
+		ii.B = tag.Marshal(ii.B) // 使用 \1 这个字符来分割 key/value
 		ii.B = encoding.MarshalUint64(ii.B, metricID)
 		ii.Next()
 	}
 
-	// Add index entries for composite tags: MetricGroup+tag -> MetricID
+	// Add index entries for composite tags: MetricGroup+tag -> MetricID  //??? 这个是干嘛
 	compositeKey := kbPool.Get()
 	for _, tag := range mn.Tags {
-		compositeKey.B = marshalCompositeTagKey(compositeKey.B[:0], mn.MetricGroup, tag.Key)
+		compositeKey.B = marshalCompositeTagKey(compositeKey.B[:0], mn.MetricGroup, tag.Key) // MetricGroup+tag
 		ii.B = append(ii.B, prefix...)
 		ii.B = marshalTagValue(ii.B, compositeKey.B)
 		ii.B = marshalTagValue(ii.B, tag.Value)
@@ -2908,7 +2908,7 @@ var graphiteReverseTagKey = []byte("\xff")
 // It is expected that the given prefix isn't used by users.
 const compositeTagKeyPrefix = '\xfe'
 
-func marshalCompositeTagKey(dst, name, key []byte) []byte {
+func marshalCompositeTagKey(dst, name, key []byte) []byte { // 01 索引
 	dst = append(dst, compositeTagKeyPrefix)
 	dst = encoding.MarshalVarUint64(dst, uint64(len(name)))
 	dst = append(dst, name...)

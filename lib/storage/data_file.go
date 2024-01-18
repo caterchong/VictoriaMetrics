@@ -105,7 +105,7 @@ const (
 )
 
 func EachPartition(storagePath string, dataPartitionFlag int8, callback func(partitionType int8, path string) (isStop bool, err error)) (err error) {
-	dataPath := filepath.Join(storagePath, dataDirname)
+	dataPath := filepath.Join(storagePath, DataDirname)
 	if !fs.IsPathExist(dataPath) {
 		err = fmt.Errorf("data path [%s] not exists", dataPath)
 		return
@@ -174,7 +174,7 @@ func GetBlocksData(src []byte, blockHeadersCount int, callback func(AccountID ui
 type AllDataIteratorCallBackFunc func(tsid *TSID, rowCount uint32) (isStop bool, err error)
 
 func IterateAllDatas(storagePath string, dataPartitionFlag int8, callback AllDataIteratorCallBackFunc) (err error) {
-	dataPath := filepath.Join(storagePath, dataDirname)
+	dataPath := filepath.Join(storagePath, DataDirname)
 	if !fs.IsPathExist(dataPath) {
 		err = fmt.Errorf("data path [%s] not exists", dataPath)
 		return
