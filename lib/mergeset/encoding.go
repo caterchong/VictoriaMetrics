@@ -174,7 +174,7 @@ func (ib *inmemoryBlock) updateCommonPrefixUnsorted() {
 	ib.commonPrefix = append(ib.commonPrefix[:0], cp...)
 }
 
-func commonPrefixLen(a, b []byte) int {
+func commonPrefixLen(a, b []byte) int { // 找两个串的公共长度
 	i := 0
 	if len(a) > len(b) {
 		for i < len(b) && a[i] == b[i] {

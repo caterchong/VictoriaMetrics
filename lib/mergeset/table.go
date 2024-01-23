@@ -120,7 +120,7 @@ type Table struct {
 	flushCallbackWorkerWG sync.WaitGroup
 	needFlushCallbackCall uint32
 
-	prepareBlock PrepareBlockCallback
+	prepareBlock PrepareBlockCallback  // merge 时候的 call back 函数
 	isReadOnly   *uint32
 
 	// rawItems contains recently added items that haven't been converted to parts yet.
@@ -335,7 +335,7 @@ func MustOpenTable(path string, flushCallback func(), prepareBlock PrepareBlockC
 	tb := &Table{
 		path:          path,
 		flushCallback: flushCallback,
-		prepareBlock:  prepareBlock,
+		prepareBlock:  prepareBlock,  // 初始化 call back 函数
 		isReadOnly:    isReadOnly,
 		fileParts:     pws,
 		mergeIdx:      uint64(time.Now().UnixNano()),

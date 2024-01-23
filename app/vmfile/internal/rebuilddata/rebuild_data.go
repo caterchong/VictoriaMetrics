@@ -29,6 +29,13 @@ func RebuildData(storageDataPath string, outputDir string) {
 		}
 		monthlyPartitionNames := storage.GetMonthlyPartitionNames(partitionDir)
 		for _, month := range monthlyPartitionNames {
+			monthlyDir := filepath.Join(partitionDir, month)
+			partNames := storage.GetPartNames(monthlyDir)
+			if len(partNames) == 0 {
+				logger.Infof("monthly partition empty:%s", monthlyDir)
+				continue
+			}
+			logger.Infof("open monthly partition:%s", monthlyDir)
 			m := storage.NewTsidDataMap()
 			m.ReadFromMonthlyPartitionDir(storageDataPath, partitionName, month)
 			// {
@@ -55,22 +62,26 @@ func RebuildData(storageDataPath string, outputDir string) {
 		}
 	}
 	// 删除所有文件夹，除了最近用于合并的文件夹
-	for _, partitionName := range partitionNames {
-		partitionDir := filepath.Join(storageDataPath, "data", partitionName)
-		if !fs.IsPathExist(partitionDir) {
-			continue
-		}
-		monthlyPartitionNames := storage.GetMonthlyPartitionNames(partitionDir)
-		for _, month := range monthlyPartitionNames {
-			monthlyPartitionDir := filepath.Join(partitionDir, month)
-			reindex.MustRemoveAllExcept(monthlyPartitionDir, newPartDirNames)
+	if strings.HasPrefix(outputDir, storageDataPath) {
+		for _, partitionName := range partitionNames {
+			partitionDir := filepath.Join(storageDataPath, "data", partitionName)
+			if !fs.IsPathExist(partitionDir) {
+				continue
+			}
+			monthlyPartitionNames := storage.GetMonthlyPartitionNames(partitionDir)
+			for _, month := range monthlyPartitionNames {
+				monthlyPartitionDir := filepath.Join(partitionDir, month)
+				reindex.MustRemoveAllExcept(monthlyPartitionDir, newPartDirNames)
+			}
 		}
 	}
-	partitionDir := filepath.Join(storageDataPath, "data", "big")
+	partitionDir := filepath.Join(outputDir, "data", "big")
 	monthlyPartitionNames := storage.GetMonthlyPartitionNames(partitionDir)
 	for _, month := range monthlyPartitionNames {
 		monthlyPartitionDir := filepath.Join(partitionDir, month)
-		reindex.MustRemoveAllExcept(monthlyPartitionDir, newPartDirNames)
+		if strings.HasPrefix(outputDir, storageDataPath) {
+			reindex.MustRemoveAllExcept(monthlyPartitionDir, newPartDirNames)
+		}
 		for _, partName := range newPartDirNames {
 			if !strings.HasSuffix(partName, storage.TempName) {
 				logger.Panicf("part name error:%s", partName)

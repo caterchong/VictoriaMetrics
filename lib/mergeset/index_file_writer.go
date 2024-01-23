@@ -18,6 +18,7 @@ type PartWriter struct {
 	unpackedMetaIndexRowBufLen uint64
 	ph                         partHeader
 	partDir                    string
+	dedupCount                 uint64
 }
 
 func NewPartWriterFromPartDir(dir string) (*PartWriter, error) {
@@ -42,6 +43,7 @@ func (w *PartWriter) Reset() {
 	w.bhs = w.bhs[:0]
 	w.unpackedIndexBlockBufLen = 0
 	w.unpackedMetaIndexRowBufLen = 0
+	w.dedupCount = 0
 }
 
 func (w *PartWriter) MustClose() {
@@ -58,6 +60,7 @@ func (w *PartWriter) MustClose() {
 	w.itemsWriter.MustClose()
 	w.lensWriter.MustClose()
 	w.ph.MustWriteMetadata(w.partDir)
+	logger.Infof("dedup count : %d", w.dedupCount)
 }
 
 // MustInitFromFilePart
@@ -65,11 +68,15 @@ func (w *PartWriter) MustClose() {
 func (w *PartWriter) WriteUnsortedBlock(ib *inmemoryBlock) {
 	ib.SortItems()
 	dedup := ib.DeDuplicate()
-	if dedup > 0 {
-		logger.Infof("dedup count=%d", dedup)
-	}
+	// if dedup > 0 {
+	// 	logger.Infof("dedup count=%d", dedup)
+	// }
+	w.dedupCount += uint64(dedup)
 	if ib.CheckDuplicate() {
 		logger.Panicf("index dup")
+	}
+	if !ib.isSorted() {
+		logger.Panicf("not sorted")
 	}
 	// todo: 为了解决索引可能重复的问题，需要在这里做一个去重的功能
 	lastItem := ib.items[len(ib.items)-1].Bytes(ib.data)
@@ -84,6 +91,7 @@ func (w *PartWriter) WriteUnsortedBlock(ib *inmemoryBlock) {
 	// w.compressLevel = getCompressLevel(uint64(ib.Len()))
 	bh := &blockHeader{} // 每调用一次就是增加一个 block
 	w.bhs = append(w.bhs, bh)
+	w.sb.Reset()
 	bh.firstItem, bh.commonPrefix, bh.itemsCount, bh.marshalType =
 		ib.MarshalSortedData(&w.sb, bh.firstItem[:0], bh.commonPrefix[:0], w.compressLevel)
 	mr := w.mrs[len(w.mrs)-1]

@@ -188,3 +188,9 @@ func GetTotalItemsCountFromTableDir(tableDir string) (total uint64, err error) {
 // 	}
 // 	return nil
 // }
+
+func Show(s *Storage) {
+	db := s.idb()
+	t := db.tb
+	mergeset.Show(t)
+}

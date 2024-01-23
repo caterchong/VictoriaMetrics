@@ -43,7 +43,7 @@ const (
 	//
 	// nsPrefixMetricNameToTSID = 0
 
-	// Prefix for Tag->MetricID entries.
+	// Prefix for Tag->MetricID entries.  // 这里面又包含三种索引
 	NsPrefixTagToMetricIDs = 1
 
 	// Prefix for MetricID->TSID entries.
@@ -1278,7 +1278,7 @@ func (db *indexDB) GetSeriesCount(accountID, projectID uint32, deadline uint64) 
 	if err != nil {
 		return 0, err
 	}
-
+	logger.Infof("use ext db, curr=%d", n)
 	var nExt uint64
 	db.doExtDB(func(extDB *indexDB) {
 		is := extDB.getIndexSearch(accountID, projectID, deadline)
@@ -1298,10 +1298,12 @@ func (is *indexSearch) getSeriesCount() (uint64, error) {
 	loopsPaceLimiter := 0
 	var metricIDsLen uint64
 	// Extract the number of series from ((__name__=value): metricIDs) rows
-	kb.B = is.marshalCommonPrefix(kb.B[:0], NsPrefixTagToMetricIDs)
-	kb.B = marshalTagValue(kb.B, nil)
+	kb.B = is.marshalCommonPrefix(kb.B[:0], NsPrefixTagToMetricIDs) // 9 字节前缀
+	kb.B = marshalTagValue(kb.B, nil)                               // 10 字节了，追加了 \1   // 这里实际搜索这种索引  metricGroupName -> metric id
 	ts.Seek(kb.B)
+	it := 0
 	for ts.NextItem() {
+		it++
 		if loopsPaceLimiter&paceLimiterFastIterationsMask == 0 {
 			if err := checkSearchDeadlineAndPace(is.deadline); err != nil {
 				return 0, err
@@ -1312,12 +1314,12 @@ func (is *indexSearch) getSeriesCount() (uint64, error) {
 		if !bytes.HasPrefix(item, kb.B) {
 			break
 		}
-		tail := item[len(kb.B):]
+		tail := item[len(kb.B):] // 9 字节以后的内容
 		n := bytes.IndexByte(tail, tagSeparatorChar)
 		if n < 0 {
 			return 0, fmt.Errorf("invalid tag->metricIDs line %q: cannot find tagSeparatorChar %d", item, tagSeparatorChar)
 		}
-		tail = tail[n+1:]
+		tail = tail[n+1:] // tail 就是 metric id 的列表
 		if err := mp.InitOnlyTail(item, tail); err != nil {
 			return 0, err
 		}
@@ -1329,6 +1331,7 @@ func (is *indexSearch) getSeriesCount() (uint64, error) {
 	if err := ts.Error(); err != nil {
 		return 0, fmt.Errorf("error when counting unique timeseries: %w", err)
 	}
+	logger.Infof("iterate count:%d", it)
 	return metricIDsLen, nil
 }
 
@@ -2809,19 +2812,19 @@ const (
 	int64Max = int64((1 << 63) - 1)
 )
 
-func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricName) {
+func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricName) { // 添加每天的日期索引
 	ii := getIndexItems()
 	defer putIndexItems(ii)
 
-	ii.B = marshalCommonPrefix(ii.B, NsPrefixDateToMetricID, mn.AccountID, mn.ProjectID)
-	ii.B = encoding.MarshalUint64(ii.B, date)
+	ii.B = marshalCommonPrefix(ii.B, NsPrefixDateToMetricID, mn.AccountID, mn.ProjectID)  // 索引 5
+	ii.B = encoding.MarshalUint64(ii.B, date) // 8 字节代表的日期
 	ii.B = encoding.MarshalUint64(ii.B, tsid.MetricID)
 	ii.Next()
 
 	// Create per-day inverted index entries for TSID.
 	//
 	// Do not use marshalCommonPrefix() here, since mn already contains (AccountID, ProjectID)
-	ii.B = append(ii.B, NsPrefixDateMetricNameToTSID)
+	ii.B = append(ii.B, NsPrefixDateMetricNameToTSID)  // 索引 7
 	ii.B = encoding.MarshalUint64(ii.B, date)
 	ii.B = mn.Marshal(ii.B)
 	ii.B = append(ii.B, kvSeparatorChar)
@@ -2831,7 +2834,7 @@ func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricNa
 	// Create per-day inverted index entries for metricID.
 	kb := kbPool.Get()
 	defer kbPool.Put(kb) // 0xfe
-	kb.B = marshalCommonPrefix(kb.B[:0], NsPrefixDateTagToMetricIDs, mn.AccountID, mn.ProjectID)
+	kb.B = marshalCommonPrefix(kb.B[:0], NsPrefixDateTagToMetricIDs, mn.AccountID, mn.ProjectID)  // 索引 6
 	kb.B = encoding.MarshalUint64(kb.B, date)
 	ii.registerTagIndexes(kb.B, mn, tsid.MetricID)
 	is.db.tb.AddItems(ii.Items)
@@ -2854,7 +2857,7 @@ func (ii *indexItems) registerTagIndexes(prefix []byte, mn *MetricName, metricID
 		ii.Next()
 	}
 
-	// Add index entries for composite tags: MetricGroup+tag -> MetricID  //??? 这个是干嘛
+	// Add index entries for composite tags: MetricGroup+tag -> MetricID
 	compositeKey := kbPool.Get()
 	for _, tag := range mn.Tags {
 		compositeKey.B = marshalCompositeTagKey(compositeKey.B[:0], mn.MetricGroup, tag.Key) // MetricGroup+tag
@@ -3109,7 +3112,7 @@ func generateUniqueMetricID() uint64 {
 // between VictoriaMetrics restarts.
 var nextUniqueMetricID = uint64(time.Now().UnixNano())
 
-func marshalCommonPrefix(dst []byte, nsPrefix byte, accountID, projectID uint32) []byte {
+func marshalCommonPrefix(dst []byte, nsPrefix byte, accountID, projectID uint32) []byte { // 9 字节的前缀
 	dst = append(dst, nsPrefix)
 	dst = encoding.MarshalUint32(dst, accountID)
 	dst = encoding.MarshalUint32(dst, projectID)
@@ -3224,7 +3227,7 @@ func (mp *tagToMetricIDsRowParser) MarshalPrefix(dst []byte) []byte {
 //
 // b must contain tag->metricIDs row.
 // b cannot be re-used until Reset call.
-func (mp *tagToMetricIDsRowParser) InitOnlyTail(b, tail []byte) error {
+func (mp *tagToMetricIDsRowParser) InitOnlyTail(b, tail []byte) error { // 8 字节的倍数的 metric id 列表
 	if len(tail) == 0 {
 		return fmt.Errorf("missing metricID in the tag->metricIDs row %q", b)
 	}
@@ -3247,7 +3250,7 @@ func (mp *tagToMetricIDsRowParser) EqualPrefix(x *tagToMetricIDsRowParser) bool 
 }
 
 // MetricIDsLen returns the number of MetricIDs in the mp.tail
-func (mp *tagToMetricIDsRowParser) MetricIDsLen() int {
+func (mp *tagToMetricIDsRowParser) MetricIDsLen() int { // 数一数有多少个 metric id
 	return len(mp.tail) / 8
 }
 
@@ -3299,13 +3302,13 @@ func (mp *tagToMetricIDsRowParser) GetMatchingSeriesCount(filter, negativeFilter
 	return n
 }
 
-func mergeTagToMetricIDsRows(data []byte, items []mergeset.Item) ([]byte, []mergeset.Item) {
-	data, items = mergeTagToMetricIDsRowsInternal(data, items, NsPrefixTagToMetricIDs)
-	data, items = mergeTagToMetricIDsRowsInternal(data, items, NsPrefixDateTagToMetricIDs)
+func mergeTagToMetricIDsRows(data []byte, items []mergeset.Item) ([]byte, []mergeset.Item) { // merge 时候的 callback 函数  //??? 为什么要特殊处理两种索引
+	data, items = mergeTagToMetricIDsRowsInternal(data, items, NsPrefixTagToMetricIDs)     // 索引 1  , tag -> metric ids
+	data, items = mergeTagToMetricIDsRowsInternal(data, items, NsPrefixDateTagToMetricIDs) // 索引 6, date + tag -> metric ids
 	return data, items
 }
 
-func mergeTagToMetricIDsRowsInternal(data []byte, items []mergeset.Item, nsPrefix byte) ([]byte, []mergeset.Item) {
+func mergeTagToMetricIDsRowsInternal(data []byte, items []mergeset.Item, nsPrefix byte) ([]byte, []mergeset.Item) { // 索引 1 和索引 6 的特殊处理函数
 	// Perform quick checks whether items contain rows starting from nsPrefix
 	// based on the fact that items are sorted.
 	if len(items) <= 2 {

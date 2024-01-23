@@ -2,16 +2,21 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"strings"
+	"time"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/compare"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/countdata"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/countindex"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/exportmetrics"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/rebuild"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/rebuilddata"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/reindex"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/simplemerge"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
 )
@@ -26,6 +31,11 @@ var (
 	projectID         = flag.Int("project_id", 0, "tenant project id")
 	minScrapeInterval = flag.Duration("dedup.minScrapeInterval", 0, "Leave only the last sample in every time series per each discrete interval "+
 		"equal to -dedup.minScrapeInterval > 0. See https://docs.victoriametrics.com/#deduplication for details")
+	comparePathA    = flag.String("compare_a", "", "")
+	comparePathB    = flag.String("compare_b", "", "")
+	simpleMergeFrom = flag.String("simple_merge_from", "", "Multiple storage paths separated by commas")
+	simpleMergeTo   = flag.String("simple_merge_to", "", "")
+	simpleMergeFlag = flag.Int("simple_merge_flag", 3, "")
 )
 
 func main() {
@@ -62,7 +72,37 @@ func main() {
 	case "rebuild":
 		storage.SetDedupInterval(*minScrapeInterval)
 		rebuild.Rebuild(*storageDataPath)
+	case "compare":
+		compare.Compare(*comparePathA, *comparePathB)
+	case "simple_merge":
+		if len(*simpleMergeFrom) == 0 {
+			logger.Errorf("must set -simple_merge_from")
+			return
+		}
+		if len(*simpleMergeTo) == 0 {
+			logger.Errorf("must set -simple_merge_to")
+			return
+		}
+		simplemerge.SimpleMerge(strings.Split(*simpleMergeFrom, ","), *simpleMergeTo, *simpleMergeFlag)
+	case "use_storage":
+		useStorage()
+	case "offline_index_merge": // 使用 vm 本身提供的 merge 功能来进行 merge
+		reindex.OfflineIndexMerge(*storageDataPath)
+	case "merge_index_curr_and_prev":
+		reindex.MergeIndexWithPrevAndCurr(*storageDataPath, *output)
 	default:
 		logger.Panicf("unknown action:%s", *action)
 	}
+}
+
+func useStorage() {
+	s := storage.MustOpenStorage(*storageDataPath, time.Duration(24*365)*time.Hour, 0, 0)
+	n, err := s.GetSeriesCount(0, 0, uint64(time.Now().Unix())+60)
+	if err != nil {
+		logger.Panicf("GetSeriesCount error, err=%w", err)
+	}
+	fmt.Printf("\tSeriesCount=%d\n", n)
+	//s.GetTSDBStatus()
+	storage.Show(s)
+	s.MustClose()
 }

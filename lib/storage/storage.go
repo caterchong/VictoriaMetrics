@@ -2142,7 +2142,7 @@ func (s *Storage) prefillNextIndexDB(rows []rawRow, mrs []*MetricRow) error {
 	return firstError
 }
 
-func (s *Storage) updatePerDateData(rows []rawRow, mrs []*MetricRow) error {
+func (s *Storage) updatePerDateData(rows []rawRow, mrs []*MetricRow) error { // 更新按照日期建立的索引
 	var date uint64
 	var hour uint64
 	var prevTimestamp int64
@@ -2175,7 +2175,7 @@ func (s *Storage) updatePerDateData(rows []rawRow, mrs []*MetricRow) error {
 	for i := range rows {
 		r := &rows[i]
 		if r.Timestamp != prevTimestamp {
-			date = uint64(r.Timestamp) / msecPerDay
+			date = uint64(r.Timestamp) / msecPerDay // 这个值是  1970 年开始的天数
 			hour = uint64(r.Timestamp) / msecPerHour
 			prevTimestamp = r.Timestamp
 		}

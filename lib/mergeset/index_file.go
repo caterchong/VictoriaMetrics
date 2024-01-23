@@ -12,6 +12,7 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 )
 
 type IndexIteratorFunc func(
@@ -387,3 +388,312 @@ func ReadMetaDataFromPartDir(partDir string) (itemsCount uint64, blocksCount uin
 // 	sort.Ints(arr)
 // 	return arr
 // }
+
+func Show(t *Table) {
+	fmt.Printf("part file count:%d\n", len(t.fileParts))
+	var blockCount uint64
+	for _, p := range t.fileParts {
+		fmt.Printf("part header:%+v\n", p.p.ph)
+		fmt.Printf("index block count:%d\n", len(p.p.mrs))
+		for _, row := range p.p.mrs {
+			blockCount += uint64(row.blockHeadersCount)
+		}
+	}
+	fmt.Printf("blockCount=%d\n", blockCount)
+}
+
+type PartHeaders []partHeader
+
+func (arr PartHeaders) Len() int {
+	return len(arr)
+}
+
+func (arr PartHeaders) Less(i, j int) bool {
+	if string(arr[i].lastItem) < string(arr[j].firstItem) {
+		return true
+	}
+	return string(arr[i].firstItem) < string(arr[j].firstItem)
+}
+
+func (arr PartHeaders) Swap(i, j int) {
+	//arr[i], arr[j] = arr[j], arr[i]  //??? 不明白为什么这里浅拷贝出问题了
+	//temp := arr[i]
+	//arr[i].itemsCount = arr[j].itemsCount
+	//arr[i].firstItem =
+	a := &arr[i]
+	b := &arr[j]
+	a.itemsCount, b.itemsCount = b.itemsCount, a.itemsCount
+	a.blocksCount, b.blocksCount = b.blocksCount, a.blocksCount
+	a.firstItem, b.firstItem = swapSlice(b.firstItem, a.firstItem)
+	//a.firstItem, b.firstItem = b.firstItem, a.firstItem
+	//a.lastItem, b.lastItem = b.lastItem, a.lastItem
+	a.lastItem, b.lastItem = swapSlice(b.lastItem, a.lastItem)
+}
+
+func swapSlice(a, b []byte) ([]byte, []byte) {
+	return b, a
+}
+
+func GetPartHeaders(tableDir string, partNames []string) []partHeader {
+	phs := make([]partHeader, len(partNames))
+	for i, partName := range partNames {
+		phs[i].Reset()
+		partDir := filepath.Join(tableDir, partName)
+		phs[i].MustReadMetadata(partDir)
+	}
+	sort.Sort(PartHeaders(phs))
+	return phs
+}
+
+// func findMinFirstItem(phs []partHeader, firstItem []byte)int{
+// 	minIdx := -1
+// 	for i:=range phs{
+// 		ph := &phs[i]
+// 		if string(ph.firstItem)<string(firstItem){
+// 			minIdx = i
+// 			firstItem = ph.firstItem
+// 		}
+// 	}
+// 	return minIdx
+// }
+
+func showPhs(phs []partHeader) {
+	//minFirstItem := phs[0].firstItem
+	start := 0
+	curIdx := 1
+	for ; curIdx < len(phs); curIdx++ {
+		cur := &phs[curIdx]
+		prev := &phs[curIdx-1]
+		if string(cur.firstItem) < string(prev.lastItem) {
+			// 检查是否包含
+			if string(cur.firstItem) <= string(prev.firstItem) &&
+				string(cur.lastItem) <= string(prev.firstItem) {
+				fmt.Printf("\t%d is in %d\n", curIdx, curIdx-1)
+			} else {
+				fmt.Printf("\t%d is behind %d\n", curIdx, curIdx-1)
+			}
+		} else {
+			fmt.Printf("section: from %d to %d\n", start, curIdx-1)
+			start = curIdx
+		}
+	}
+	fmt.Printf("section: from %d to %d\n\n", start, len(phs)-1)
+}
+
+func CheckTree(tableDir string, partNames []string) {
+	if !fs.IsPathExist(tableDir) {
+		return
+	}
+	phs := GetPartHeaders(tableDir, partNames)
+	showPhs(phs)
+	//prefix := []byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	for idx, partName := range partNames {
+		ph := &phs[idx]
+		if idx > 0 {
+			prevPh := &phs[idx-1]
+			if string(ph.firstItem) < string(prevPh.lastItem) {
+				logger.Errorf("part header no sorted: idx=%d", idx)
+			}
+		}
+		// var ph partHeader
+		partDir := filepath.Join(tableDir, partName)
+		// ph.MustReadMetadata(partDir)
+		//
+		var zstdData []byte
+		var metaIndexBin []byte
+		var err error
+		metaIndexBin, err = ReadFile(nil, filepath.Join(partDir, metaindexFilename))
+		if err != nil {
+			logger.Panicf("read metaindex.bin fail")
+		}
+		// metaIndexBin, err = encoding.DecompressZSTD(nil, zstdData)
+		// if err != nil {
+		// 	logger.Panicf("metaindex.bin DecompressZSTD fail")
+		// }
+		var metaindexRows []metaindexRow
+		metaindexRows, err = unmarshalMetaindexRows(nil, bytes.NewReader(metaIndexBin))
+		if err != nil {
+			logger.Panicf("metaindex.bin unmarshalMetaindexRows error, err=%s", err.Error())
+		}
+		indexFilePath := filepath.Join(partDir, indexFilename)
+		var indexFileBin []byte
+		indexFileBin, err = ReadFile(nil, indexFilePath)
+		if err != nil {
+			logger.Panicf("read index.bin fail")
+		}
+		var bhsData []byte
+		//
+		itemsFile := fs.MustOpenReaderAt(filepath.Join(partDir, itemsFilename))
+		defer itemsFile.MustClose()
+		lensFile := fs.MustOpenReaderAt(filepath.Join(partDir, lensFilename))
+		defer lensFile.MustClose()
+		//
+		for _, mr := range metaindexRows {
+			if string(mr.firstItem) < string(ph.firstItem) {
+				logger.Panicf("mr.firstItem error")
+			}
+			if string(mr.firstItem) > string(ph.lastItem) {
+				logger.Panicf("mr.firstItem error")
+			}
+			zstdData = indexFileBin[mr.indexBlockOffset : mr.indexBlockOffset+uint64(mr.indexBlockSize)]
+			bhsData, err = encoding.DecompressZSTD(nil, zstdData)
+			if err != nil {
+				logger.Panicf("index.bin DecompressZSTD fail")
+			}
+			bhs := make([]blockHeader, int(mr.blockHeadersCount))
+			for j := 0; j < int(mr.blockHeadersCount); j++ {
+				bhs[j].Reset()
+				bhsData, err = bhs[j].UnmarshalNoCopy(bhsData)
+				if err != nil {
+					logger.Panicf("index.bin UnmarshalNoCopy fail")
+				}
+				// ctx.BlockHeaders must be sorted
+			}
+			var sb storageBlock
+			var ib inmemoryBlock
+			var prevLastItem []byte
+			for _, bh := range bhs {
+				if string(bh.firstItem) < string(mr.firstItem) {
+					logger.Panicf("bh.first item error")
+				}
+				if string(bh.firstItem) > string(ph.lastItem) {
+					logger.Panicf("bh.first item error")
+				}
+				sb.Reset()
+				sb.itemsData = itemsFile.ReadByOffset(int64(bh.itemsBlockOffset), int64(bh.itemsBlockSize))
+				sb.lensData = lensFile.ReadByOffset(int64(bh.lensBlockOffset), int64(bh.lensBlockSize))
+				ib.Reset()
+				err = ib.UnmarshalData(&sb, bh.firstItem, bh.commonPrefix, bh.itemsCount, bh.marshalType)
+				if err != nil {
+					logger.Panicf("ib.UnmarshalData fail")
+				}
+				items := ib.items
+				data := ib.data
+				firstIem := items[0].Bytes(data)
+				if string(firstIem) != string(bh.firstItem) {
+					logger.Panicf("bh.firstItem error")
+				}
+				if !ib.isSorted() {
+					logger.Panicf("not sorted")
+				}
+				if len(prevLastItem) > 0 {
+					// 后一个块的第一条，不能小于前一个块的最后一条
+					if string(bh.firstItem) < string(prevLastItem) {
+						fmt.Printf("\t\t\tmr:%X\n", mr.firstItem)
+						fmt.Printf("\t\t\tbh:%X\n", bh.firstItem)
+						fmt.Printf("\t\t\t   %X\n", prevLastItem)
+						logger.Panicf("string(prevLastItem) error")
+					}
+				}
+				prevLastItem = append(prevLastItem[:0], items[len(items)-1].Bytes(data)...)
+				// 检查索引 1
+				// for itemIndex, item := range items {
+				// 	if bytes.Equal(prefix, item.Bytes(data)[:len(prefix)]) {
+				// 		fmt.Printf("\t\tindex: %d %d %d\n", mrIndex, bhIndex, itemIndex)
+				// 		fmt.Printf("\t\t\t%X\n", mr.firstItem)
+				// 		fmt.Printf("\t\t\t%X\n", bh.firstItem)
+				// 		fmt.Printf("\t\t\t%X\n", prevLastItem)
+				// 		break
+				// 	}
+				// }
+			}
+		}
+
+	}
+}
+
+// 索引 1 的结构
+type TagIndex struct {
+	AccountID   uint32
+	ProjectID   uint32
+	MetricGroup []byte
+	Key         []byte
+	Value       []byte
+	MetricIDs   []uint64
+}
+
+func (t *TagIndex) Reset() {
+	t.AccountID = 0
+	t.ProjectID = 0
+	t.MetricGroup = t.MetricGroup[:0]
+	t.Key = t.Key[:0]
+	t.Value = t.Value[:0]
+	t.MetricIDs = t.MetricIDs[:0]
+}
+
+func (t *TagIndex) UnmarshalFromTag(data []byte) (err error) {
+	tagType := data[0]
+	data = data[1:]
+	switch tagType {
+	case 1: // MetricGroup -> MetricID
+		idx := bytes.IndexByte(data, 1)
+		if idx < 0 {
+			err = fmt.Errorf("not found end of metric group")
+			return
+		}
+		t.MetricGroup = data[:idx]
+		data = data[idx+1:]
+	case 0xfe: //  MetricGroup + Tag -> MetricID
+		var n uint64
+		data, n, err = encoding.UnmarshalVarUint64(data)
+		if err != nil {
+			err = fmt.Errorf("not found metric group len, err=%w", err)
+			return
+		}
+		t.MetricGroup = data[:n]
+		data = data[n:]
+		data, err = t.parseKV(data)
+		if err != nil {
+			return
+		}
+	default: // Tag -> MetricID
+		data, err = t.parseKV(data)
+		if err != nil {
+			return
+		}
+	}
+	if len(data) < 8 || len(data)%8 != 0 {
+		err = fmt.Errorf("metric id format error")
+		return
+	}
+	if len(data)/8 > 10000 {
+		logger.Panicf("error")
+	}
+	for i := 0; i < len(data); i += 8 {
+		t.MetricIDs = append(t.MetricIDs, encoding.UnmarshalUint64(data[i:i+8]))
+	}
+	return nil
+}
+
+func (t *TagIndex) Unmarshal(data []byte) (err error) {
+	if len(data) < 20 {
+		err = fmt.Errorf("length error")
+		return
+	}
+	if data[0] != 1 {
+		err = fmt.Errorf("index type error")
+		return
+	}
+	t.AccountID = encoding.UnmarshalUint32(data[1:])
+	t.ProjectID = encoding.UnmarshalUint32(data[5:])
+	data = data[9:]
+	return t.UnmarshalFromTag(data)
+}
+
+func (t *TagIndex) parseKV(data []byte) (left []byte, err error) {
+	idx := bytes.IndexByte(data, 1)
+	if idx < 0 {
+		err = fmt.Errorf("not found end of metric tag")
+		return
+	}
+	t.Key = data[:idx]
+	data = data[idx+1:]
+	idx = bytes.IndexByte(data, 1)
+	if idx < 0 {
+		err = fmt.Errorf("not found end of metric value")
+		return
+	}
+	t.Value = data[:idx]
+	left = data[idx+1:]
+	return
+}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/metricidset"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
@@ -86,6 +88,7 @@ func Reindex(storageDataPath string, indexTableFlag int8, outputDir string) {
 		}
 		err = storage.IterateAllIndexes(storageDataPath, indexTableFlag, callback)
 	} else {
+		logger.Panicf("not support now")
 		callback := func(
 			tableType int,
 			partDir string,
@@ -204,7 +207,7 @@ type TagIndex struct {
 	Value           []byte
 }
 
-func ParseTagIndex(data []byte, out *TagIndex) (err error) {
+func ParseTagIndex(data []byte, out *TagIndex) (err error) { // 索引 1 的格式
 	out.AccountID = encoding.UnmarshalUint32(data[1:])
 	out.ProjectID = encoding.UnmarshalUint32(data[5:])
 	data = data[9:]
@@ -271,3 +274,482 @@ func ParseTagIndex(data []byte, out *TagIndex) (err error) {
 	}
 	return
 }
+
+// 使用 vm 本身提供的 merge 功能来进行 merge
+func OfflineIndexMerge(storageDataPath string) {
+	if !fs.IsPathExist(storageDataPath) {
+		logger.Panicf("storageDataPath [%s] not exists", storageDataPath)
+	}
+	indexdbDir := filepath.Join(storageDataPath, storage.IndexdbDirname)
+	if !fs.IsPathExist(indexdbDir) {
+		logger.Panicf("indexdb [%s] not exists", indexdbDir)
+	}
+	_, indexTableCurr, indexTablePrev := storage.GetIndexDBTableNames(indexdbDir)
+	ts := time.Now().UnixNano()
+	dstPath := filepath.Join(indexTableCurr, fmt.Sprintf("%016X", ts))
+	ts++
+	mergeset.MergeParts(indexTableCurr, storage.ReadPartsNameOfIndexTable(indexTableCurr),
+		dstPath, nil, nil)
+	//
+	dstPathPrev := filepath.Join(indexTablePrev, fmt.Sprintf("%016X", ts))
+	ts++
+	mergeset.MergeParts(indexTablePrev, storage.ReadPartsNameOfIndexTable(indexTablePrev),
+		dstPathPrev, nil, nil)
+}
+
+// 把 prev 的索引 merge 到 curr，并丢弃重复项
+func MergeIndexWithPrevAndCurr(storageDataPath string, outputDir string) {
+	if !fs.IsPathExist(storageDataPath) {
+		logger.Panicf("storageDataPath [%s] not exists", storageDataPath)
+	}
+	if len(outputDir) > 0 {
+		// if !fs.IsPathExist(filepath.Dir(outputDir)) {
+		// 	logger.Panicf("outputDir parent path [%s] not exists", filepath.Dir(outputDir))
+		// }
+		fs.MustMkdirIfNotExist(outputDir)
+	} else {
+		outputDir = storageDataPath
+	}
+	indexdbDir := filepath.Join(storageDataPath, storage.IndexdbDirname)
+	if !fs.IsPathExist(indexdbDir) {
+		logger.Panicf("indexdb [%s] not exists", indexdbDir)
+	}
+	//curTableMetricID := GetAllMetricIDOfCurrentTable(storageDataPath) // 得到 current 分区的所有 id
+	//addedMetricIDForIndex2 := metricidset.NewMetricIDSet()
+	//addedMetricIDForIndex3 := metricidset.NewMetricIDSet()
+	//
+	_, indexTableCurr, indexTablePrev := storage.GetIndexDBTableNames(indexdbDir)
+	ts := time.Now().UnixNano()
+	dstPath := filepath.Join(outputDir, storage.IndexdbDirname,
+		filepath.Base(indexTableCurr), fmt.Sprintf("%016X", ts))
+	ts++
+	// 找到 part names
+	currPartNames := storage.ReadPartsNameOfIndexTable(indexTableCurr)
+	prevPartNames := storage.ReadPartsNameOfIndexTable(indexTablePrev)
+	dirs := make([]string, 0, len(currPartNames)+len(prevPartNames))
+	for _, partName := range currPartNames {
+		partDir := filepath.Join(indexTableCurr, partName)
+		dirs = append(dirs, partDir)
+	}
+	for _, partName := range prevPartNames {
+		partDir := filepath.Join(indexTablePrev, partName)
+		dirs = append(dirs, partDir)
+	}
+	//
+	// var addedCount uint64
+	// var skipCount uint64
+	// skipItemCallback := func(data []byte) (isSkip bool) {
+	// 	indexType := data[0]
+	// 	//
+	// 	switch indexType {
+	// 	// case storage.NsPrefixMetricIDToTSID:
+	// 	// 	accountID := encoding.UnmarshalUint32(data[1:])
+	// 	// 	projectID := encoding.UnmarshalUint32(data[5:])
+	// 	// 	metricID := encoding.UnmarshalUint64(data[9:])
+	// 	// 	if addedMetricIDForIndex2.Add(accountID, projectID, metricID) {
+	// 	// 		skipCount++
+	// 	// 		return true
+	// 	// 	}
+	// 	// 	addedCount++
+	// 	case storage.NsPrefixMetricIDToMetricName:
+	// 		accountID := encoding.UnmarshalUint32(data[1:])
+	// 		projectID := encoding.UnmarshalUint32(data[5:])
+	// 		metricID := encoding.UnmarshalUint64(data[9:])
+	// 		if addedMetricIDForIndex3.Has(accountID, projectID, metricID) {
+	// 			skipCount++
+	// 			return true
+	// 		}
+	// 		addedMetricIDForIndex3.Add(accountID, projectID, metricID)
+	// 		addedCount++
+	// 	}
+	// 	return false
+	// }
+	//indexWithTag := mergeset.TagIndex{}
+	//indexWithTag.Reset()
+	// addedMetricIDForIndex1MetricGroup := metricidset.NewMetricIDSet()
+	// addedMetricIDForIndex1GroupAndTag := metricidset.NewMetricIDSet()
+	// addedMetricIDForIndex1Tag := metricidset.NewMetricIDSet()
+	// var addedCountOfIndex1 uint64
+	// var skipCountOfIndex1 uint64
+	// checkIndexType1 := func(cur []byte) bool {
+	// 	indexWithTag.Reset()
+	// 	if err := indexWithTag.Unmarshal(cur); err != nil {
+	// 		logger.Panicf("tag index format error, err=%w", err)
+	// 	}
+	// 	// 处理三种索引
+	// 	var set *metricidset.MetricIDSet
+	// 	if len(indexWithTag.MetricGroup) > 0 {
+	// 		if len(indexWithTag.Key) > 0 {
+	// 			set = addedMetricIDForIndex1GroupAndTag
+	// 		} else {
+	// 			set = addedMetricIDForIndex1MetricGroup
+	// 		}
+	// 	} else {
+	// 		set = addedMetricIDForIndex1Tag
+	// 	}
+	// 	//检查 metric id 去重
+	// 	leftMetricIDs := compareMetricIDs(indexWithTag.AccountID, indexWithTag.ProjectID,
+	// 		indexWithTag.MetricIDs, set)
+	// 	return len(leftMetricIDs) == 0
+	// }
+	// if checkIndexType1 != nil {
+	// 	checkIndexType1 = nil
+	// }
+	//
+	index1Filter := NewFilterForTagIndex()
+	index2Filter := NewFilterForMetricIDIndex()
+	index3Filter := NewFilterForMetricIDIndex()
+	index5Filter := NewFilterForDateToMetricIDIndex()
+	index6Filter := NewFilterForDateAndTagToMetricIDIndex()
+	index7Filter := NewFilterForDateAndMetricNameIndex()
+
+	prepareBlockCallback := func(alldata []byte, items []mergeset.Item) ([]byte, []mergeset.Item) {
+		idx := 0
+		for idx < len(items) {
+			cur := items[idx].Bytes(alldata)
+			indexType := cur[0]
+			//
+			switch indexType {
+			case storage.NsPrefixTagToMetricIDs:
+				if index1Filter.IsSkip(cur) {
+					items = append(items[:idx], items[idx+1:]...)
+					index1Filter.SkipCount++
+					continue
+				}
+				index1Filter.AddCount++
+			case storage.NsPrefixMetricIDToTSID:
+				if index2Filter.IsSkip(cur) {
+					items = append(items[:idx], items[idx+1:]...)
+					index2Filter.SkipCount++
+					continue
+				}
+				index2Filter.AddCount++
+			case storage.NsPrefixMetricIDToMetricName:
+				if index3Filter.IsSkip(cur) {
+					items = append(items[:idx], items[idx+1:]...)
+					index3Filter.SkipCount++
+					continue
+				}
+				index3Filter.AddCount++
+			case storage.NsPrefixDateToMetricID:
+				if index5Filter.IsSkip(cur) {
+					items = append(items[:idx], items[idx+1:]...)
+					index5Filter.SkipCount++
+					continue
+				}
+				index5Filter.AddCount++
+			case storage.NsPrefixDateTagToMetricIDs:
+				if index6Filter.IsSkip(cur) {
+					items = append(items[:idx], items[idx+1:]...)
+					index6Filter.SkipCount++
+					continue
+				}
+				index6Filter.AddCount++
+			case storage.NsPrefixDateMetricNameToTSID:
+				if index7Filter.IsSkip(cur) {
+					items = append(items[:idx], items[idx+1:]...)
+					index7Filter.SkipCount++
+					continue
+				}
+				index7Filter.AddCount++
+			}
+			idx++
+		}
+		return alldata, items
+	}
+	mergeset.MergePartsByPartDirs(indexTableCurr, dirs,
+		dstPath,
+		prepareBlockCallback,
+		//nil,
+		//skipItemCallback, // 业务逻辑写在这里，得不到正确的结果. //??? 为什么
+		nil,
+	)
+	//
+	if strings.HasPrefix(outputDir, storageDataPath) {
+		// 同一文件夹的时候，删除不需要的文件
+		os.Remove(filepath.Join(indexTablePrev, "parts.json"))
+	} else {
+		prevTablePath := filepath.Join(outputDir, storage.IndexdbDirname,
+			filepath.Base(indexTablePrev))
+		fs.MustMkdirIfNotExist(prevTablePath)
+	}
+	//fmt.Printf("ok. addedCount=%d, skipCount=%d\n", addedCount, skipCount)
+	//fmt.Printf("\tmetric id, index2=%d, index3=%d\n", addedMetricIDForIndex2.Len(), addedMetricIDForIndex3.Len())
+	fmt.Printf("OK\n")
+	fmt.Printf("\tindex 1: add %d, skip %d\n", index1Filter.AddCount, index1Filter.SkipCount)
+	fmt.Printf("\tindex 2: add %d, skip %d\n", index2Filter.AddCount, index2Filter.SkipCount)
+	fmt.Printf("\tindex 3: add %d, skip %d\n", index3Filter.AddCount, index3Filter.SkipCount)
+	fmt.Printf("\tindex 5: add %d, skip %d\n", index5Filter.AddCount, index5Filter.SkipCount)
+	fmt.Printf("\tindex 6: add %d, skip %d\n", index6Filter.AddCount, index6Filter.SkipCount)
+	fmt.Printf("\tindex 7: add %d, skip %d\n", index7Filter.AddCount, index7Filter.SkipCount)
+}
+
+// func compareMetricIDs(accountID, projectID uint32, metricIDs []uint64, set *metricidset.MetricIDSet) []uint64 {
+// 	c := 0
+// 	i := len(metricIDs) - 1
+// 	for i >= 0 {
+// 		c++
+// 		if c > 10000 {
+// 			logger.Panicf("error")
+// 		}
+// 		id := metricIDs[i]
+// 		if !set.Add(accountID, projectID, id) {
+// 			i--
+// 			continue
+// 		}
+// 		metricIDs[i] = metricIDs[len(metricIDs)-1]
+// 		metricIDs = metricIDs[:len(metricIDs)-1]
+// 		i--
+// 	}
+// 	return metricIDs
+// }
+
+// FilterForTagIndex 索引 1 的过滤器
+type FilterForTagIndex struct {
+	IndexInfo               mergeset.TagIndex
+	MetricIDsForGroup       *metricidset.MetricIDSet
+	MetricIDsForGroupAndTag *metricidset.MetricIDSet
+	MetricIDsForTag         *metricidset.MetricIDSet
+	AddCount                uint64
+	SkipCount               uint64
+}
+
+func NewFilterForTagIndex() *FilterForTagIndex {
+	return &FilterForTagIndex{
+		MetricIDsForGroup:       metricidset.NewMetricIDSet(),
+		MetricIDsForGroupAndTag: metricidset.NewMetricIDSet(),
+		MetricIDsForTag:         metricidset.NewMetricIDSet(),
+	}
+}
+
+func (f *FilterForTagIndex) IsSkip(data []byte) bool {
+	f.IndexInfo.Reset()
+	if err := f.IndexInfo.Unmarshal(data); err != nil {
+		logger.Panicf("tag index format error, err=%w", err)
+	}
+	// 处理三种索引
+	var set *metricidset.MetricIDSet
+	if len(f.IndexInfo.MetricGroup) > 0 {
+		if len(f.IndexInfo.Key) > 0 {
+			set = f.MetricIDsForGroupAndTag
+		} else {
+			set = f.MetricIDsForGroup
+		}
+	} else {
+		set = f.MetricIDsForTag
+	}
+	//检查 metric id 去重
+	leftMetricIDs := f.compareMetricIDs(set)
+	return len(leftMetricIDs) == 0
+}
+
+func (f *FilterForTagIndex) compareMetricIDs(set *metricidset.MetricIDSet) []uint64 {
+	for i := 0; i < len(f.IndexInfo.MetricIDs); i++ {
+		id := f.IndexInfo.MetricIDs[i]
+		if set.Add(f.IndexInfo.AccountID, f.IndexInfo.ProjectID, id) {
+			f.IndexInfo.MetricIDs[i] = f.IndexInfo.MetricIDs[len(f.IndexInfo.MetricIDs)-1]
+			f.IndexInfo.MetricIDs = f.IndexInfo.MetricIDs[:len(f.IndexInfo.MetricIDs)-1]
+		}
+	}
+	return f.IndexInfo.MetricIDs
+}
+
+type FilterForMetricIDIndex struct {
+	MetricIDs *metricidset.MetricIDSet
+	AddCount  uint64
+	SkipCount uint64
+}
+
+func NewFilterForMetricIDIndex() *FilterForMetricIDIndex {
+	return &FilterForMetricIDIndex{
+		MetricIDs: metricidset.NewMetricIDSet(),
+	}
+}
+
+func (f *FilterForMetricIDIndex) IsSkip(data []byte) bool {
+	accountID := encoding.UnmarshalUint32(data[1:])
+	projectID := encoding.UnmarshalUint32(data[5:])
+	metricID := encoding.UnmarshalUint64(data[9:])
+	return f.MetricIDs.Add(accountID, projectID, metricID)
+}
+
+type FilterForDateToMetricIDIndex struct {
+	Dates     map[uint64]*metricidset.MetricIDSet
+	MetricIDs []uint64
+	AddCount  uint64
+	SkipCount uint64
+}
+
+func NewFilterForDateToMetricIDIndex() *FilterForDateToMetricIDIndex {
+	return &FilterForDateToMetricIDIndex{
+		Dates:     make(map[uint64]*metricidset.MetricIDSet, 100),
+		MetricIDs: make([]uint64, 0, 100),
+	}
+}
+
+func (f *FilterForDateToMetricIDIndex) IsSkip(data []byte) bool {
+	accountID := encoding.UnmarshalUint32(data[1:])
+	projectID := encoding.UnmarshalUint32(data[5:])
+	date := encoding.UnmarshalUint64(data[9:])
+	data = data[17:]
+	if len(data) < 8 || len(data)%8 != 0 {
+		logger.Panicf("date index format error")
+	}
+	m, ok := f.Dates[date]
+	if !ok {
+		m = metricidset.NewMetricIDSet()
+		f.Dates[date] = m
+	}
+	f.MetricIDs = f.MetricIDs[:0]
+	for i := 0; i < len(data); i += 8 {
+		f.MetricIDs = append(f.MetricIDs, encoding.UnmarshalUint64(data[i:i+8]))
+	}
+	// 判断是否都在
+	for i := 0; i < len(f.MetricIDs); i++ {
+		id := f.MetricIDs[i]
+		if m.Add(accountID, projectID, id) {
+			f.MetricIDs[i] = f.MetricIDs[len(f.MetricIDs)-1]
+			f.MetricIDs = f.MetricIDs[:len(f.MetricIDs)-1]
+		}
+	}
+	return len(f.MetricIDs) == 0
+}
+
+type FilterForDateAndTagToMetricIDIndex struct { // 索引 6
+	DatesForGroup       map[uint64]*metricidset.MetricIDSet
+	DatesForGroupAndTag map[uint64]*metricidset.MetricIDSet
+	DatesForTag         map[uint64]*metricidset.MetricIDSet
+	IndexInfo           mergeset.TagIndex
+	//MetricIDs           []uint64
+	AddCount  uint64
+	SkipCount uint64
+}
+
+func NewFilterForDateAndTagToMetricIDIndex() *FilterForDateAndTagToMetricIDIndex {
+	return &FilterForDateAndTagToMetricIDIndex{
+		DatesForGroup:       make(map[uint64]*metricidset.MetricIDSet, 100),
+		DatesForGroupAndTag: make(map[uint64]*metricidset.MetricIDSet, 100),
+		DatesForTag:         make(map[uint64]*metricidset.MetricIDSet, 100),
+		//MetricIDs:           make([]uint64, 0, 100),
+	}
+}
+
+func (f *FilterForDateAndTagToMetricIDIndex) IsSkip(data []byte) bool {
+	accountID := encoding.UnmarshalUint32(data[1:])
+	projectID := encoding.UnmarshalUint32(data[5:])
+	date := encoding.UnmarshalUint64(data[9:])
+	data = data[17:]
+	f.IndexInfo.Reset()
+	if err := f.IndexInfo.UnmarshalFromTag(data); err != nil {
+		logger.Panicf("err=%w", err)
+	}
+	var set *metricidset.MetricIDSet
+	var has bool
+	if len(f.IndexInfo.MetricGroup) > 0 {
+		if len(f.IndexInfo.Key) > 0 {
+			set, has = f.DatesForGroupAndTag[date]
+			if !has {
+				set = metricidset.NewMetricIDSet()
+				f.DatesForGroupAndTag[date] = set
+			}
+		} else {
+			set, has = f.DatesForGroup[date]
+			if !has {
+				set = metricidset.NewMetricIDSet()
+				f.DatesForGroup[date] = set
+			}
+		}
+	} else {
+		set, has = f.DatesForTag[date]
+		if !has {
+			set = metricidset.NewMetricIDSet()
+			f.DatesForTag[date] = set
+		}
+	}
+	// for _, metricID := range f.IndexInfo.MetricIDs {
+	// 	set.Add(accountID, projectID, metricID)
+	// }
+	// 判断是否都在
+	metricIDs := f.IndexInfo.MetricIDs
+	for i := 0; i < len(metricIDs); i++ {
+		id := metricIDs[i]
+		if set.Add(accountID, projectID, id) {
+			metricIDs[i] = metricIDs[len(metricIDs)-1]
+			metricIDs = metricIDs[:len(metricIDs)-1]
+		}
+	}
+	return len(metricIDs) == 0
+}
+
+type FilterForDateAndMetricNameIndex struct {
+	Dates     map[uint64]*metricidset.MetricIDSet
+	MetricIDs []uint64
+	AddCount  uint64
+	SkipCount uint64
+}
+
+func NewFilterForDateAndMetricNameIndex() *FilterForDateAndMetricNameIndex {
+	return &FilterForDateAndMetricNameIndex{
+		Dates:     make(map[uint64]*metricidset.MetricIDSet, 100),
+		MetricIDs: make([]uint64, 0, 100),
+	}
+}
+
+func (f *FilterForDateAndMetricNameIndex) IsSkip(data []byte) bool {
+	date := encoding.UnmarshalUint64(data[1:])
+	data = data[9:]
+	accountID := encoding.UnmarshalUint32(data[0:])
+	projectID := encoding.UnmarshalUint32(data[4:])
+	data = data[8:]
+	idx := bytes.IndexByte(data, 1)
+	if idx < 0 {
+		logger.Panicf("date+metric index format error")
+	}
+	//metricGroupName := data[:idx]
+	data = data[idx+1:]
+	idx = bytes.IndexByte(data, 2)
+	if idx < 0 {
+		logger.Panicf("date+metric index format error, tag end not found")
+	}
+	data = data[idx+1:]
+	if len(data) < 8 || len(data)%8 != 0 {
+		logger.Panicf("date index format error")
+	}
+	set, ok := f.Dates[date]
+	if !ok {
+		set = metricidset.NewMetricIDSet()
+		f.Dates[date] = set
+	}
+	f.MetricIDs = f.MetricIDs[:0]
+	for i := 0; i < len(data); i += 8 {
+		f.MetricIDs = append(f.MetricIDs, encoding.UnmarshalUint64(data[i:i+8]))
+	}
+	// 判断是否都在
+	for i := 0; i < len(f.MetricIDs); i++ {
+		id := f.MetricIDs[i]
+		if set.Add(accountID, projectID, id) {
+			f.MetricIDs[i] = f.MetricIDs[len(f.MetricIDs)-1]
+			f.MetricIDs = f.MetricIDs[:len(f.MetricIDs)-1]
+		}
+	}
+	return len(f.MetricIDs) == 0
+}
+
+// type FilterForMetricIDToNameIndex struct {
+// 	MetricIDs *metricidset.MetricIDSet
+// 	AddCount  uint64
+// 	SkipCount uint64
+// }
+
+// func NewFilterForMetricIDToNameIndex() *FilterForMetricIDToNameIndex {
+// 	return &FilterForMetricIDToNameIndex{
+// 		MetricIDs: metricidset.NewMetricIDSet(),
+// 	}
+// }
+
+// func (f *FilterForMetricIDToNameIndex) IsSkip(data []byte) bool {
+// 	accountID := encoding.UnmarshalUint32(data[1:])
+// 	projectID := encoding.UnmarshalUint32(data[5:])
+// 	metricID := encoding.UnmarshalUint64(data[9:])
+// 	return f.MetricIDs.Add(accountID, projectID, metricID)
+// }

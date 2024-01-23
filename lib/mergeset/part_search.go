@@ -36,6 +36,8 @@ type partSearch struct {
 
 	ib        *inmemoryBlock
 	ibItemIdx int
+	//
+	loadBlockCount uint64
 }
 
 func (ps *partSearch) reset() {
@@ -52,6 +54,8 @@ func (ps *partSearch) reset() {
 
 	ps.ib = nil
 	ps.ibItemIdx = 0
+	//
+	ps.loadBlockCount = 0
 }
 
 // Init initializes ps for search in the p.
@@ -63,8 +67,34 @@ func (ps *partSearch) Init(p *part) {
 	ps.p = p
 }
 
+func checkSorted(mrs []metaindexRow) {
+	prev := mrs[0]
+	for i := 1; i < len(mrs); i++ {
+		if string(prev.firstItem) > string(mrs[i].firstItem) {
+			logger.Panicf("not sorted")
+		}
+		prev = mrs[i]
+	}
+	fmt.Printf("\n\n")
+	for idx, mr := range mrs {
+		fmt.Printf("%d %X\n", idx, string(mr.firstItem))
+	}
+	fmt.Printf("\n\n")
+}
+
+func checkBlockHeaderSorted(bhs []blockHeader) {
+	prev := bhs[0]
+	for i := 1; i < len(bhs); i++ {
+		cur := bhs[i]
+		if string(prev.firstItem) > string(cur.firstItem) {
+			logger.Panicf("not sorted")
+		}
+		prev = cur
+	}
+}
+
 // Seek seeks for the first item greater or equal to k in ps.
-func (ps *partSearch) Seek(k []byte) {
+func (ps *partSearch) Seek(k []byte) { // part 里面搜索的逻辑
 	if err := ps.Error(); err != nil {
 		// Do nothing on unrecoverable error.
 		return
@@ -77,13 +107,13 @@ func (ps *partSearch) Seek(k []byte) {
 		return
 	}
 
-	if ps.tryFastSeek(k) {
+	if ps.tryFastSeek(k) { // 在 ib 里面搜索。第一次搜索肯定没有 ib
 		return
 	}
 
 	ps.Item = nil
-	ps.mrs = ps.p.mrs
-	ps.bhs = nil
+	ps.mrs = ps.p.mrs // 头信息赋值进去
+	ps.bhs = nil      // 一开始还没有 block 数组的信息
 
 	ps.indexBuf = ps.indexBuf[:0]
 	ps.compressedIndexBuf = ps.compressedIndexBuf[:0]
@@ -93,7 +123,7 @@ func (ps *partSearch) Seek(k []byte) {
 	ps.ib = nil
 	ps.ibItemIdx = 0
 
-	if string(k) <= string(ps.p.ph.firstItem) {
+	if string(k) <= string(ps.p.ph.firstItem) { // 说明从第一个块开始就有所需要的数据
 		// The first item in the first block matches.
 		ps.err = ps.nextBlock()
 		return
@@ -103,6 +133,8 @@ func (ps *partSearch) Seek(k []byte) {
 	if len(ps.mrs) == 0 {
 		logger.Panicf("BUG: part without metaindex rows passed to partSearch")
 	}
+	//sort.IsSorted(MetaIndexRows(ps.mrs))
+	checkSorted(ps.mrs)
 	n := sort.Search(len(ps.mrs), func(i int) bool {
 		return string(k) <= string(ps.mrs[i].firstItem)
 	})
@@ -110,7 +142,8 @@ func (ps *partSearch) Seek(k []byte) {
 		// The given k may be located in the previous metaindexRow, so go to it.
 		n--
 	}
-	ps.mrs = ps.mrs[n:]
+	logger.Infof("mrs, from %d to %d", len(ps.mrs), len(ps.mrs)-n)
+	ps.mrs = ps.mrs[n:] // 二分查找，找到所需要的块
 
 	// Read block headers for the found metaindexRow.
 	if err := ps.nextBHS(); err != nil {
@@ -119,6 +152,7 @@ func (ps *partSearch) Seek(k []byte) {
 	}
 
 	// Locate the first block to scan.
+	checkBlockHeaderSorted(ps.bhs)
 	n = sort.Search(len(ps.bhs), func(i int) bool {
 		return string(k) <= string(ps.bhs[i].firstItem)
 	})
@@ -126,7 +160,8 @@ func (ps *partSearch) Seek(k []byte) {
 		// The given k may be located in the previous block, so go to it.
 		n--
 	}
-	ps.bhs = ps.bhs[n:]
+	logger.Infof("bhs, from %d to %d", len(ps.bhs), len(ps.bhs)-n)
+	ps.bhs = ps.bhs[n:] // 二分查找，找到需要的块
 
 	// Read the block.
 	if err := ps.nextBlock(); err != nil {
@@ -137,8 +172,8 @@ func (ps *partSearch) Seek(k []byte) {
 	// Locate the first item to scan in the block.
 	items := ps.ib.items
 	data := ps.ib.data
-	cpLen := commonPrefixLen(ps.ib.commonPrefix, k)
-	ps.ibItemIdx = binarySearchKey(data, items, k, cpLen)
+	cpLen := commonPrefixLen(ps.ib.commonPrefix, k)       // 在 block 的 commonPrefix 和要搜索的 key 之前，找公共长度  //??? 不理解为什么
+	ps.ibItemIdx = binarySearchKey(data, items, k, cpLen) // 通过二分查找，找到了位置
 	if ps.ibItemIdx < len(items) {
 		// The item has been found.
 		return
@@ -152,8 +187,8 @@ func (ps *partSearch) Seek(k []byte) {
 	}
 }
 
-func (ps *partSearch) tryFastSeek(k []byte) bool {
-	if ps.ib == nil {
+func (ps *partSearch) tryFastSeek(k []byte) bool { // part 内的快速搜索  // ??? 怎么个快速法
+	if ps.ib == nil { // 如果有 inmomery block, 就在 ib 里面搜索
 		return false
 	}
 	items := ps.ib.items
@@ -237,37 +272,40 @@ func (ps *partSearch) Error() error {
 	return ps.err
 }
 
-func (ps *partSearch) nextBlock() error {
+//var loadCount uint64
+
+func (ps *partSearch) nextBlock() error { // 在当前 part 遍历数据
 	if len(ps.bhs) == 0 {
 		// The current metaindexRow is over. Proceed to the next metaindexRow.
-		if err := ps.nextBHS(); err != nil {
+		if err := ps.nextBHS(); err != nil { // 在还没有 block 数组的情况下，先装载 block 数组
 			return err
 		}
 	}
-	bh := &ps.bhs[0]
+	bh := &ps.bhs[0] // 消费一个 blockHeader
 	ps.bhs = ps.bhs[1:]
-	ib, err := ps.getInmemoryBlock(bh)
-	if err != nil {
+	ib, err := ps.getInmemoryBlock(bh) // 根据 blockHeader，把整个 block 加载到内存
+	ps.loadBlockCount++
+	if err != nil { // 在上一层做了二分查找，这里把当前 blockHeader 对应的块加载到内存
 		return err
 	}
-	ps.ib = ib
-	ps.ibItemIdx = 0
+	ps.ib = ib       // 这下有了内存对象
+	ps.ibItemIdx = 0 // ib 内的索引
 	return nil
 }
 
-func (ps *partSearch) nextBHS() error {
+func (ps *partSearch) nextBHS() error { // 装载 block 数组
 	if len(ps.mrs) == 0 {
 		return io.EOF
 	}
-	mr := &ps.mrs[0]
+	mr := &ps.mrs[0] // 消费一个 metaindexRow
 	ps.mrs = ps.mrs[1:]
 	idxbKey := blockcache.Key{
 		Part:   ps.p,
 		Offset: mr.indexBlockOffset,
 	}
 	b := idxbCache.GetBlock(idxbKey)
-	if b == nil {
-		idxb, err := ps.readIndexBlock(mr)
+	if b == nil { // 一开始也没有 cache
+		idxb, err := ps.readIndexBlock(mr) // 从一个 metaindexRow 读出 block 数组
 		if err != nil {
 			return fmt.Errorf("cannot read index block: %w", err)
 		}
@@ -275,11 +313,11 @@ func (ps *partSearch) nextBHS() error {
 		idxbCache.PutBlock(idxbKey, b)
 	}
 	idxb := b.(*indexBlock)
-	ps.bhs = idxb.bhs
+	ps.bhs = idxb.bhs // 这下得到了 block 数组
 	return nil
 }
 
-func (ps *partSearch) readIndexBlock(mr *metaindexRow) (*indexBlock, error) {
+func (ps *partSearch) readIndexBlock(mr *metaindexRow) (*indexBlock, error) { // 从一个 metaindexRow 读出 block 数组
 	ps.compressedIndexBuf = bytesutil.ResizeNoCopyMayOverallocate(ps.compressedIndexBuf, int(mr.indexBlockSize))
 	ps.p.indexFile.MustReadAt(ps.compressedIndexBuf, int64(mr.indexBlockOffset))
 
@@ -289,7 +327,7 @@ func (ps *partSearch) readIndexBlock(mr *metaindexRow) (*indexBlock, error) {
 		return nil, fmt.Errorf("cannot decompress index block: %w", err)
 	}
 	idxb := &indexBlock{
-		buf: append([]byte{}, ps.indexBuf...),
+		buf: append([]byte{}, ps.indexBuf...), //??? 不懂为什么要这么拷贝
 	}
 	idxb.bhs, err = unmarshalBlockHeadersNoCopy(idxb.bhs[:0], idxb.buf, int(mr.blockHeadersCount))
 	if err != nil {
@@ -298,14 +336,14 @@ func (ps *partSearch) readIndexBlock(mr *metaindexRow) (*indexBlock, error) {
 	return idxb, nil
 }
 
-func (ps *partSearch) getInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) {
+func (ps *partSearch) getInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) { // 根据 blockHeader，把一个块加载到内存
 	ibKey := blockcache.Key{
 		Part:   ps.p,
 		Offset: bh.itemsBlockOffset,
 	}
 	b := ibCache.GetBlock(ibKey)
 	if b == nil {
-		ib, err := ps.readInmemoryBlock(bh)
+		ib, err := ps.readInmemoryBlock(bh) // 从磁盘读取一个块
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +354,7 @@ func (ps *partSearch) getInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) 
 	return ib, nil
 }
 
-func (ps *partSearch) readInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) {
+func (ps *partSearch) readInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) { // 从磁盘读取一个块
 	ps.sb.Reset()
 
 	ps.sb.itemsData = bytesutil.ResizeNoCopyMayOverallocate(ps.sb.itemsData, int(bh.itemsBlockSize))
@@ -333,13 +371,13 @@ func (ps *partSearch) readInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error)
 	return ib, nil
 }
 
-func binarySearchKey(data []byte, items []Item, k []byte, cpLen int) int {
+func binarySearchKey(data []byte, items []Item, k []byte, cpLen int) int { // 在 ib 的 items 数组中做二分查找
 	if len(items) == 0 {
 		return 0
 	}
-	suffix := k[cpLen:]
+	suffix := k[cpLen:] // 找到公共前缀后，可以少比较一些字符。 只要比较后缀就行了。  !!! 精彩
 	it := items[0]
-	it.Start += uint32(cpLen)
+	it.Start += uint32(cpLen) // it.Bytes(data)[cpLen:]  // 换个写法也行的
 	if string(suffix) <= it.String(data) {
 		// Fast path - the item is the first.
 		return 0
@@ -360,5 +398,5 @@ func binarySearchKey(data []byte, items []Item, k []byte, cpLen int) int {
 			j = h
 		}
 	}
-	return int(i + offset)
+	return int(i + offset) //??? 到底找的是开始位置还是结束位置?
 }

@@ -339,8 +339,8 @@ func (m *TsidDataMap) ReadFromMonthlyPartitionDir(storagePath string, partitionN
 			}
 		}
 	}
-	logger.Infof("default tenant:%d", len(m.DefaultTenant))
-	logger.Infof("tenant:%d", len(m.Tenants))
+	//logger.Infof("default tenant:%d", len(m.DefaultTenant))
+	//logger.Infof("tenant:%d", len(m.Tenants))
 	//logger.Infof("metricIDs:%d", len(metricIDs))
 	return
 }
