@@ -11,12 +11,12 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fastnum"
 )
 
-const n = 32767
+const tableLen = 32767
 
 var table = func() []int64 {
-	out := make([]int64, 0, n)
+	out := make([]int64, 0, tableLen)
 	var cur int64 = 10
-	for i := 1; i <= n; i++ {
+	for i := 1; i <= tableLen; i++ {
 		out = append(out, cur)
 		if cur*10 > 0 {
 			cur *= 10
@@ -27,11 +27,7 @@ var table = func() []int64 {
 
 // CalibrateScale calibrates a and b with the corresponding exponents ae, be
 // and returns the resulting exponent e.
-func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) { // 这个函数是绝对的瓶颈  // exponent 指数
-	// backupA := append([]int64{}, a...)
-	// backupB := append([]int64{}, b...)
-	// backupAE := ae
-	// backupBE := be
+func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) {
 	if ae == be {
 		// Fast path - exponents are equal.
 		return ae
@@ -49,57 +45,132 @@ func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) { // 这
 	}
 
 	upExp := ae - be
-	downExp := int16(0) // 看起来是计算出一个最小的值
+	downExp := int16(0)
 	for _, v := range a {
-		maxUpExp := maxUpExponent(v) // 计算 v 等于 10 的几次方
+		maxUpExp := maxUpExponent(v)
 		if upExp-maxUpExp > downExp {
 			downExp = upExp - maxUpExp
 		}
 	}
 	upExp -= downExp
-	for i, v := range a {
-		if isSpecialValue(v) {
-			// Do not take into account special values.
-			continue
+	if upExp > 0 {
+		times := table[upExp-1]
+		for i, v := range a {
+			if isSpecialValue(v) {
+				// Do not take into account special values.
+				continue
+			}
+			a[i] = v * times
 		}
-		adjExp := upExp
-		if adjExp > n {
-			panic(fmt.Sprintf("too large: %d", adjExp))
-		}
-		if adjExp > 0 {
-			v *= table[adjExp-1]
-		}
-		// for adjExp > 0 { // 一直乘 10，直到达到预定的指数次数  // todo: 用查表法，一次就够了
-		// 	v *= 10
-		// 	adjExp--
-		// }
-		a[i] = v
 	}
 	if downExp > 0 {
+		times := table[downExp-1]
 		for i, v := range b {
 			if isSpecialValue(v) {
 				// Do not take into account special values.
 				continue
 			}
-			adjExp := downExp
-			// for adjExp > 0 { // todo: 使用查表法
-			// 	v /= 10
-			// 	adjExp--
-			// }
-			if adjExp > n {
-				panic(fmt.Sprintf("too large: %d", adjExp))
-			}
-			if adjExp > 0 {
-				v /= table[adjExp-1]
-			}
-			b[i] = v
+			b[i] = v / times
 		}
 	}
-	ret := be + downExp
-	// writeToFile(backupA, backupAE, backupB, backupBE, ret)
-	// panic("p")
-	return ret
+	return be + downExp
 }
+
+// const n = 32767
+
+// var table = func() []int64 {
+// 	out := make([]int64, 0, n)
+// 	var cur int64 = 10
+// 	for i := 1; i <= n; i++ {
+// 		out = append(out, cur)
+// 		if cur*10 > 0 {
+// 			cur *= 10
+// 		}
+// 	}
+// 	return out
+// }()
+
+// // CalibrateScale calibrates a and b with the corresponding exponents ae, be
+// // and returns the resulting exponent e.
+// func CalibrateScale1(a []int64, ae int16, b []int64, be int16) (e int16) { // 这个函数是绝对的瓶颈  // exponent 指数
+// 	// backupA := append([]int64{}, a...)
+// 	// backupB := append([]int64{}, b...)
+// 	// backupAE := ae
+// 	// backupBE := be
+// 	if ae == be {
+// 		// Fast path - exponents are equal.
+// 		return ae
+// 	}
+// 	if len(a) == 0 {
+// 		return be
+// 	}
+// 	if len(b) == 0 {
+// 		return ae
+// 	}
+
+// 	if ae < be {
+// 		a, b = b, a
+// 		ae, be = be, ae
+// 	}
+
+// 	upExp := ae - be
+// 	downExp := int16(0) // 看起来是计算出一个最小的值
+// 	for _, v := range a {
+// 		maxUpExp := maxUpExponent(v) // 计算 v 等于 10 的几次方
+// 		if upExp-maxUpExp > downExp {
+// 			downExp = upExp - maxUpExp
+// 		}
+// 	}
+// 	upExp -= downExp
+// 	if upExp > 0 {
+// 		times := table[upExp-1]
+// 		for i, v := range a {
+// 			if isSpecialValue(v) {
+// 				// Do not take into account special values.
+// 				continue
+// 			}
+// 			a[i] = v * times
+// 		}
+// 		adjExp := upExp
+// 		if adjExp > n {
+// 			panic(fmt.Sprintf("too large: %d", adjExp))
+// 		}
+// 		if adjExp > 0 {
+// 			v *= table[adjExp-1]
+// 		}
+// 		// for adjExp > 0 { // 一直乘 10，直到达到预定的指数次数  // todo: 用查表法，一次就够了
+// 		// 	v *= 10
+// 		// 	adjExp--
+// 		// }
+// 		a[i] = v
+
+// 	}
+// 	if downExp > 0 {
+// 		times := table[downExp-1]
+// 		for i, v := range b {
+// 			if isSpecialValue(v) {
+// 				// Do not take into account special values.
+// 				continue
+// 			}
+// 			adjExp := downExp
+// 			// for adjExp > 0 { // todo: 使用查表法
+// 			// 	v /= 10
+// 			// 	adjExp--
+// 			// }
+// 			if adjExp > n {
+// 				panic(fmt.Sprintf("too large: %d", adjExp))
+// 			}
+// 			if adjExp > 0 {
+// 				v /= table[adjExp-1]
+// 			}
+// 			b[i] = v
+// 		}
+// 	}
+// 	ret := be + downExp
+// 	// writeToFile(backupA, backupAE, backupB, backupBE, ret)
+// 	// panic("p")
+// 	return ret
+// }
 
 func writeToFile(a []int64, ae int16, b []int64, be int16, ret int16) {
 	f, _ := os.Create("/Users/fuchunzhang/Documents/temp/2024/2024-01-24/code.txt")
