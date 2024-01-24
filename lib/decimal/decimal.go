@@ -1,15 +1,37 @@
 package decimal
 
 import (
+	"fmt"
 	"math"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fastnum"
 )
 
+const n = 32767
+
+var table = func() []int64 {
+	out := make([]int64, 0, n)
+	var cur int64 = 10
+	for i := 1; i <= n; i++ {
+		out = append(out, cur)
+		if cur*10 > 0 {
+			cur *= 10
+		}
+	}
+	return out
+}()
+
 // CalibrateScale calibrates a and b with the corresponding exponents ae, be
 // and returns the resulting exponent e.
-func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) {
+func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) { // 这个函数是绝对的瓶颈  // exponent 指数
+	// backupA := append([]int64{}, a...)
+	// backupB := append([]int64{}, b...)
+	// backupAE := ae
+	// backupBE := be
 	if ae == be {
 		// Fast path - exponents are equal.
 		return ae
@@ -27,9 +49,9 @@ func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) {
 	}
 
 	upExp := ae - be
-	downExp := int16(0)
+	downExp := int16(0) // 看起来是计算出一个最小的值
 	for _, v := range a {
-		maxUpExp := maxUpExponent(v)
+		maxUpExp := maxUpExponent(v) // 计算 v 等于 10 的几次方
 		if upExp-maxUpExp > downExp {
 			downExp = upExp - maxUpExp
 		}
@@ -41,10 +63,16 @@ func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) {
 			continue
 		}
 		adjExp := upExp
-		for adjExp > 0 {
-			v *= 10
-			adjExp--
+		if adjExp > n {
+			panic(fmt.Sprintf("too large: %d", adjExp))
 		}
+		if adjExp > 0 {
+			v *= table[adjExp-1]
+		}
+		// for adjExp > 0 { // 一直乘 10，直到达到预定的指数次数  // todo: 用查表法，一次就够了
+		// 	v *= 10
+		// 	adjExp--
+		// }
 		a[i] = v
 	}
 	if downExp > 0 {
@@ -54,14 +82,52 @@ func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) {
 				continue
 			}
 			adjExp := downExp
-			for adjExp > 0 {
-				v /= 10
-				adjExp--
+			// for adjExp > 0 { // todo: 使用查表法
+			// 	v /= 10
+			// 	adjExp--
+			// }
+			if adjExp > n {
+				panic(fmt.Sprintf("too large: %d", adjExp))
+			}
+			if adjExp > 0 {
+				v /= table[adjExp-1]
 			}
 			b[i] = v
 		}
 	}
-	return be + downExp
+	ret := be + downExp
+	// writeToFile(backupA, backupAE, backupB, backupBE, ret)
+	// panic("p")
+	return ret
+}
+
+func writeToFile(a []int64, ae int16, b []int64, be int16, ret int16) {
+	f, _ := os.Create("/Users/fuchunzhang/Documents/temp/2024/2024-01-24/code.txt")
+	sb := &strings.Builder{}
+	writeArray(a, sb, "a")
+	writeArray(b, sb, "b")
+	sb.WriteString(fmt.Sprintf("var ae int16 = %d\n", ae))
+	sb.WriteString(fmt.Sprintf("var be int16 = %d\n", be))
+	sb.WriteString(fmt.Sprintf("var ret int16 = %d\n", ret))
+	f.WriteString(sb.String())
+	f.Close()
+}
+
+func writeArray(a []int64, sb *strings.Builder, varName string) {
+	sb.WriteString("var ")
+	sb.WriteString(varName)
+	sb.WriteString(" []int64 = []int64{")
+	isFirst := true
+	for _, v := range a {
+		if isFirst {
+			isFirst = false
+		} else {
+			sb.WriteString(",\n")
+		}
+		sb.WriteString("\t0x")
+		sb.WriteString(strconv.FormatInt(v, 16))
+	}
+	sb.WriteString("}\n")
 }
 
 // ExtendFloat64sCapacity extends dst capacity to hold additionalItems
@@ -259,7 +325,7 @@ var vaeBufPool sync.Pool
 
 const int64Max = int64(1<<63 - 1)
 
-func maxUpExponent(v int64) int16 {
+func maxUpExponent(v int64) int16 { // 计算值等于十的几次方
 	if v == 0 || isSpecialValue(v) {
 		// Any exponent allowed for zeroes and special values.
 		return 1024
