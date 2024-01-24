@@ -30,7 +30,7 @@ func SimpleMerge(fromPaths []string, toPath string, flag int) {
 	// 	logger.Errorf("to path's parent path %s not exists", filepath.Dir(toPath))
 	// 	return
 	// }
-	if checkMetricIDDuplicate(fromPaths) {
+	if len(fromPaths) > 1 && CheckMetricIDDuplicate(fromPaths) {
 		return
 	}
 	// 下面拷贝文件
@@ -112,7 +112,7 @@ func SimpleMerge(fromPaths []string, toPath string, flag int) {
 	}
 }
 
-func checkMetricIDDuplicate(fromPaths []string) bool {
+func CheckMetricIDDuplicate(fromPaths []string) bool {
 	firstOne := fromPaths[0]
 	allMetricIDs := compare.GetAllMetricIDOfCurrentTable(firstOne)
 	for i := 1; i < len(fromPaths); i++ {

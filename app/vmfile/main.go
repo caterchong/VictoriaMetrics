@@ -13,6 +13,9 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/countdata"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/countindex"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/exportmetrics"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/mergedatav2"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/mergev1"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/mergev2"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/rebuild"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/rebuilddata"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/reindex"
@@ -36,10 +39,23 @@ var (
 	simpleMergeFrom = flag.String("simple_merge_from", "", "Multiple storage paths separated by commas")
 	simpleMergeTo   = flag.String("simple_merge_to", "", "")
 	simpleMergeFlag = flag.Int("simple_merge_flag", 3, "")
+	//
+	mergev1From = flag.String("mergev1_from", "", "Multiple storage paths separated by commas")
+	mergev1To   = flag.String("mergev1_to", "", "")
+	//
+	mergeDataV2From = flag.String("merge_data_v2_from", "", "Multiple storage paths separated by commas")
+	mergeDataV2To   = flag.String("merge_data_v2_to", "", "")
+	//
+	mergev2From = flag.String("mergev2_from", "", "Multiple storage paths separated by commas")
+	mergev2To   = flag.String("mergev2_to", "", "")
+	cpu         = flag.Int("cpu", 1, "cpu count")
 )
 
 func main() {
-	runtime.GOMAXPROCS(1) // todo:
+	if *cpu < 1 {
+		*cpu = 1
+	}
+	runtime.GOMAXPROCS(*cpu) //  默认 1 个核
 	flag.Parse()
 	logger.Init()
 
@@ -90,6 +106,13 @@ func main() {
 		reindex.OfflineIndexMerge(*storageDataPath)
 	case "merge_index_curr_and_prev":
 		reindex.MergeIndexWithPrevAndCurr(*storageDataPath, *output)
+	case "merge_v1":
+		mergev1.Merge(strings.Split(*mergev1From, ","), *mergev1To)
+	case "merge_data_v2":
+		mergedatav2.MergeDataV2(strings.Split(*mergeDataV2From, ","), *mergeDataV2To)
+	case "merge_v2":
+		storage.SetDedupInterval(*minScrapeInterval)
+		mergev2.Merge(strings.Split(*mergev2From, ","), *mergev2To)
 	default:
 		logger.Panicf("unknown action:%s", *action)
 	}

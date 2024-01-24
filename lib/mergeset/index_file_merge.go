@@ -67,13 +67,13 @@ func MergePartsByPartDirs(tableDir string, partDirs []string, dstPartPath string
 		return err
 	}
 	//如果在原路径进行 merge, 则删除原来的 part 文件夹
-	if strings.HasPrefix(dstPartPath, tableDir) {
-		for _, partDir := range partDirs {
-			//partDir := filepath.Join(tableDir, partName)
-			fs.MustRemoveAll(partDir)
-		}
-		os.Remove(filepath.Join(tableDir, "parts.json"))
-	}
+	// if strings.HasPrefix(dstPartPath, tableDir) {
+	// 	for _, partDir := range partDirs {
+	// 		//partDir := filepath.Join(tableDir, partName)
+	// 		fs.MustRemoveAll(partDir)
+	// 	}
+	// 	os.Remove(filepath.Join(tableDir, "parts.json"))
+	// }
 	fs.MustSyncPath(dstPartPath)
 	return nil
 }

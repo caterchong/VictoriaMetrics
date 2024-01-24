@@ -137,7 +137,7 @@ again:
 		if hasNextItem && string(item) > nextItem {
 			break
 		}
-		if bsm.checker != nil && bsm.checker(item) { // 此回调用于跳过某些记录
+		if bsm.checker != nil && bsm.checker(item) { // 此回调用于跳过某些记录  // ??? 没找到 bug 原因，仍然非常奇怪
 			//bsr.currItemIdx++
 			// if item[0] == 3 {
 			// 	logger.Infof("skip item:%X", string(item))

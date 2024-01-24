@@ -244,30 +244,30 @@ func CountIndex(storageDataPath string, indexTableFlag int8) {
 			// 输出日期
 			for _, date := range sortDateKey(dateOfMetrics) {
 				set := dateOfMetrics[uint64(date)]
-				fmt.Printf("\t\t%s: metric id count:%d\n", time.Unix(int64(date)*86400, 0).Format("2006-01-02"), set.Len())
+				fmt.Printf("\t\t%s: metric id count:%d\n", dateToString(uint64(date)), set.Len())
 			}
 		} else if indexType == storage.NsPrefixDateTagToMetricIDs {
 			// 输出日期
 			fmt.Printf("\t\t sub type=GroupAndTag, count=%d\n", indexMap[61])
 			for _, date := range sortDateKey(dateAndTagOfMetrics1) {
 				set := dateAndTagOfMetrics1[uint64(date)]
-				fmt.Printf("\t\t\t%s: metric id count:%d\n", time.Unix(int64(date)*86400, 0).Format("2006-01-02"), set.Len())
+				fmt.Printf("\t\t\t%s: metric id count:%d\n", dateToString(uint64(date)), set.Len())
 			}
 			fmt.Printf("\t\t sub type=MetricGroup, count=%d\n", indexMap[62])
 			for _, date := range sortDateKey(dateAndTagOfMetrics2) {
 				set := dateAndTagOfMetrics2[uint64(date)]
-				fmt.Printf("\t\t\t%s: metric id count:%d\n", time.Unix(int64(date)*86400, 0).Format("2006-01-02"), set.Len())
+				fmt.Printf("\t\t\t%s: metric id count:%d\n", dateToString(uint64(date)), set.Len())
 			}
 			fmt.Printf("\t\t sub type=Tag, count=%d\n", indexMap[63])
 			for _, date := range sortDateKey(dateAndTagOfMetrics3) {
 				set := dateAndTagOfMetrics3[uint64(date)]
-				fmt.Printf("\t\t\t%s: metric id count:%d\n", time.Unix(int64(date)*86400, 0).Format("2006-01-02"), set.Len())
+				fmt.Printf("\t\t\t%s: metric id count:%d\n", dateToString(uint64(date)), set.Len())
 			}
 		} else if indexType == storage.NsPrefixDateMetricNameToTSID {
 			// 输出日期
 			for _, date := range sortDateKey(dateOfMetricsForMetricData) {
 				set := dateOfMetricsForMetricData[uint64(date)]
-				fmt.Printf("\t\t%s: metric id count:%d\n", time.Unix(int64(date)*86400, 0).Format("2006-01-02"), set.Len())
+				fmt.Printf("\t\t%s: metric id count:%d\n", dateToString(uint64(date)), set.Len())
 			}
 		}
 	}
@@ -334,4 +334,12 @@ func checkTree(storageDataPath string) {
 		partNames := storage.ReadPartsNameOfIndexTable(tableDir)
 		mergeset.CheckTree(tableDir, partNames)
 	}
+}
+
+func dateToString(date uint64) string {
+	if date == 0 {
+		return "1970-01-01"
+	}
+	t := time.Unix(int64(date*24*3600), 0).UTC()
+	return t.Format("2006-01-02")
 }
