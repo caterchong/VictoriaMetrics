@@ -697,3 +697,46 @@ func (t *TagIndex) parseKV(data []byte) (left []byte, err error) {
 	left = data[idx+1:]
 	return
 }
+
+// 提供在 index table 搜索的工具
+func GetTableSearchFromDirs(dirs []string) *TableSearch {
+	pws := make([]*partWrapper, 0, len(dirs))
+	for _, dir := range dirs {
+		p := mustOpenFilePart(dir)
+		pws = append(pws, &partWrapper{
+			p:        p,
+			mp:       nil,
+			refCount: 1,
+		})
+	}
+
+	ts := &TableSearch{}
+	ts.reset()
+	ts.tb = nil
+	ts.needClosing = false
+
+	ts.pws = pws
+
+	// Initialize the psPool.
+	if n := len(ts.pws) - cap(ts.psPool); n > 0 {
+		ts.psPool = append(ts.psPool[:cap(ts.psPool)], make([]partSearch, n)...)
+	}
+	ts.psPool = ts.psPool[:len(ts.pws)]
+	for i, pw := range ts.pws {
+		ts.psPool[i].Init(pw.p)
+	}
+	return ts
+}
+
+func ReleaseTableSearch(ts *TableSearch) {
+	for _, pw := range ts.pws {
+		pw.p.MustClose()
+		pw.p = nil
+	}
+	ts.pws = nil
+	ts.psHeap = nil
+	for _, ps := range ts.psPool {
+		ps.reset()
+	}
+	ts.psPool = nil
+}

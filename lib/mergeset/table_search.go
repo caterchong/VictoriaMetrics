@@ -92,9 +92,9 @@ func (ts *TableSearch) Seek(k []byte) {
 	ts.psHeap = ts.psHeap[:0]
 	for i := range ts.psPool {
 		ps := &ts.psPool[i]
-		defer func() {
-			logger.Infof("ps load count: %d", ps.loadBlockCount)
-		}()
+		// defer func() {
+		// 	logger.Infof("ps load count: %d", ps.loadBlockCount)
+		// }()
 		ps.Seek(k)
 		if !ps.NextItem() {
 			if err := ps.Error(); err != nil {
@@ -112,7 +112,7 @@ func (ts *TableSearch) Seek(k []byte) {
 	}
 	heap.Init(&ts.psHeap)
 	ts.Item = ts.psHeap[0].Item
-	logger.Infof("ts.psHeap len=%d", len(ts.psHeap))
+	//logger.Infof("ts.psHeap len=%d", len(ts.psHeap))
 	ts.nextItemNoop = true // 初始化的时候，游标里面已经装载了一条数据
 }
 

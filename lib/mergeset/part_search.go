@@ -134,7 +134,7 @@ func (ps *partSearch) Seek(k []byte) { // part 里面搜索的逻辑
 		logger.Panicf("BUG: part without metaindex rows passed to partSearch")
 	}
 	//sort.IsSorted(MetaIndexRows(ps.mrs))
-	checkSorted(ps.mrs)
+	//checkSorted(ps.mrs)
 	n := sort.Search(len(ps.mrs), func(i int) bool {
 		return string(k) <= string(ps.mrs[i].firstItem)
 	})
@@ -142,7 +142,7 @@ func (ps *partSearch) Seek(k []byte) { // part 里面搜索的逻辑
 		// The given k may be located in the previous metaindexRow, so go to it.
 		n--
 	}
-	logger.Infof("mrs, from %d to %d", len(ps.mrs), len(ps.mrs)-n)
+	//logger.Infof("mrs, from %d to %d", len(ps.mrs), len(ps.mrs)-n)
 	ps.mrs = ps.mrs[n:] // 二分查找，找到所需要的块
 
 	// Read block headers for the found metaindexRow.
@@ -160,7 +160,7 @@ func (ps *partSearch) Seek(k []byte) { // part 里面搜索的逻辑
 		// The given k may be located in the previous block, so go to it.
 		n--
 	}
-	logger.Infof("bhs, from %d to %d", len(ps.bhs), len(ps.bhs)-n)
+	//logger.Infof("bhs, from %d to %d", len(ps.bhs), len(ps.bhs)-n)
 	ps.bhs = ps.bhs[n:] // 二分查找，找到需要的块
 
 	// Read the block.

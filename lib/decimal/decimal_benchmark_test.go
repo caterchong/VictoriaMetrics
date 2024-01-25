@@ -1,6 +1,8 @@
 package decimal
 
-import "testing"
+import (
+	"testing"
+)
 
 func makeData() ([]int64, int16, []int64, int16, int16) {
 	var a []int64 = []int64{0x1c618a0e57323800,
@@ -6310,15 +6312,39 @@ func makeData() ([]int64, int16, []int64, int16, int16) {
 }
 
 // go test -benchmem -run=^$ -bench ^Benchmark_CalibrateScale$ github.com/VictoriaMetrics/VictoriaMetrics/lib/decimal
+// go test -benchmem -gcflags="-B" -run=^$ -bench ^Benchmark_CalibrateScale$ github.com/VictoriaMetrics/VictoriaMetrics/lib/decimal
+//
 // go test -timeout 30s -run ^TestCalibrateScale$ github.com/VictoriaMetrics/VictoriaMetrics/lib/decimal
 // Benchmark_CalibrateScale-10        23971             49633 ns/op
 // Benchmark_CalibrateScale-10        23701             48359 ns/op
 // Benchmark_CalibrateScale-10       121933              9146 ns/op
+// 7871 ns/op   减少了 if 语句
+// 6950 ns/op 去掉数组边界检查
+// 6448 ns/op 直接使用 continue 不计算的版本
+// 8952 ns/op 强制使用 unsafe 指针，且去掉 if 的版本  => 8250 ns/op 去掉数组检查
+//
+//	v3:  8989 ns/op => 7951 ns/op
+//
+// v4: 8906 ns/op  => 7857 ns/op
+// v5: 循环展开 9089 ns/op  => 7676 ns/op
 func Benchmark_CalibrateScale(bench *testing.B) {
 	a, ae, b, be, _ := makeData()
+	//vCur := 1<<63 - 2
+	//vCur - vMax
+	//bench.Logf("%d %d %d", ((1<<63 - 2) - vMax), ((1<<63 - 1) - vMax), ((1<<63 - 0) - vMax))
+	//bench.Logf("%+v, %d", isSpecialValue(a[0]), int(isSpecialValue(a[0])))
 	// bench.Logf("len a=%d", len(a))
 	// bench.Logf("ae=%d, be=%d, ret=%d", ae, be, ret)
 	// bench.Logf("len b=%d", len(b))
+	//
+	// v := a[0]
+	// compareRet := v > vMax || v < vMin
+	// ret := *(*uint8)(unsafe.Pointer(&compareRet))
+	// bench.Logf("ret=%d, %+v", ret, compareRet)
+	// compareRet = true
+	// ret = *(*uint8)(unsafe.Pointer(&compareRet))
+	// bench.Logf("true----ret=%d, %+v", ret, compareRet)
+	//
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
 		// ret1 := CalibrateScale(a, ae, b, be)

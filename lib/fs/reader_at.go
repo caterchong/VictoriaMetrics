@@ -83,6 +83,38 @@ func (r *ReaderAt) MustReadAt(p []byte, off int64) {
 	}
 }
 
+// MustReadAt reads len(p) bytes at off from r.
+func (r *ReaderAt) ReadAtNocopy(p []byte, off int64) []byte {
+	if len(p) == 0 {
+		return p
+	}
+	if off < 0 {
+		logger.Panicf("BUG: off=%d cannot be negative", off)
+	}
+	if len(r.mmapData) == 0 {
+		n, err := r.f.ReadAt(p, off)
+		if err != nil {
+			logger.Panicf("FATAL: cannot read %d bytes at offset %d of file %q: %s", len(p), off, r.Path(), err)
+		}
+		if n != len(p) {
+			logger.Panicf("FATAL: unexpected number of bytes read from file %q; got %d; want %d", r.Path(), n, len(p))
+		}
+	} else {
+		if off > int64(len(r.mmapData)-len(p)) {
+			logger.Panicf("BUG: off=%d is out of allowed range [0...%d] for len(p)=%d", off, len(r.mmapData)-len(p), len(p))
+		}
+		p = r.mmapData[off : off+int64(len(p))]
+	}
+	if r.useLocalStats {
+		atomic.AddUint64(&r.readCalls, 1)
+		atomic.AddUint64(&r.readBytes, uint64(len(p)))
+	} else {
+		readCalls.Inc()
+		readBytes.Add(len(p))
+	}
+	return p
+}
+
 func (r *ReaderAt) ReadByOffset(off int64, length int64) []byte {
 	if off < 0 {
 		logger.Panicf("BUG: off=%d cannot be negative", off)

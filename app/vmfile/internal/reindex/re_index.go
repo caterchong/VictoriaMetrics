@@ -14,6 +14,7 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/mergeset"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/uint64set"
 )
 
 func Reindex(storageDataPath string, indexTableFlag int8, outputDir string) {
@@ -512,6 +513,7 @@ type FilterForTagIndex struct {
 	MetricIDsForTag         *metricidset.MetricIDSet
 	AddCount                uint64
 	SkipCount               uint64
+	tempMetricIDs           []uint64
 }
 
 func NewFilterForTagIndex() *FilterForTagIndex {
@@ -519,6 +521,7 @@ func NewFilterForTagIndex() *FilterForTagIndex {
 		MetricIDsForGroup:       metricidset.NewMetricIDSet(),
 		MetricIDsForGroupAndTag: metricidset.NewMetricIDSet(),
 		MetricIDsForTag:         metricidset.NewMetricIDSet(),
+		tempMetricIDs:           make([]uint64, 0, 100),
 	}
 }
 
@@ -544,14 +547,39 @@ func (f *FilterForTagIndex) IsSkip(data []byte) bool {
 }
 
 func (f *FilterForTagIndex) compareMetricIDs(set *metricidset.MetricIDSet) []uint64 {
-	for i := 0; i < len(f.IndexInfo.MetricIDs); i++ {
-		id := f.IndexInfo.MetricIDs[i]
+	f.tempMetricIDs = append(f.tempMetricIDs[:0], f.IndexInfo.MetricIDs...)
+	ids := f.tempMetricIDs
+	for i := 0; i < len(ids); i++ {
+		id := ids[i]
 		if set.Add(f.IndexInfo.AccountID, f.IndexInfo.ProjectID, id) {
-			f.IndexInfo.MetricIDs[i] = f.IndexInfo.MetricIDs[len(f.IndexInfo.MetricIDs)-1]
-			f.IndexInfo.MetricIDs = f.IndexInfo.MetricIDs[:len(f.IndexInfo.MetricIDs)-1]
+			ids[i] = ids[len(ids)-1]
+			ids = ids[:len(ids)-1]
 		}
 	}
-	return f.IndexInfo.MetricIDs
+	return ids
+}
+
+// 删除重复的 metric id
+func (f *FilterForTagIndex) DeleteDupMetricID(mainid map[uint64][]uint64, setOfDupID *uint64set.Set, alldata []byte, items []mergeset.Item, idx int) []mergeset.Item {
+	f.tempMetricIDs = append(f.tempMetricIDs[:0], f.IndexInfo.MetricIDs...)
+	ids := f.tempMetricIDs
+	for i := 0; i < len(ids); i++ {
+		id := ids[i]
+		if !setOfDupID.Has(id) {
+			continue
+		}
+		if _, has := mainid[id]; has { // main id 不丢弃
+			continue
+		}
+		ids[i] = ids[len(ids)-1]
+		ids = ids[:len(ids)-1]
+	}
+	if len(ids) == 0 {
+		items = append(items[:idx], items[idx+1:]...)
+		return items
+	}
+	// todo: 修改这条记录 (好麻烦……)
+	return items
 }
 
 type FilterForMetricIDIndex struct {

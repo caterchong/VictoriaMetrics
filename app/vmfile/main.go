@@ -16,10 +16,12 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/mergedatav2"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/mergev1"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/mergev2"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/mergev3"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/rebuild"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/rebuilddata"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/reindex"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/simplemerge"
+	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/tablesearch"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
 )
@@ -48,6 +50,9 @@ var (
 	//
 	mergev2From = flag.String("mergev2_from", "", "Multiple storage paths separated by commas")
 	mergev2To   = flag.String("mergev2_to", "", "")
+	//
+	mergev3From = flag.String("mergev3_from", "", "Multiple storage paths separated by commas")
+	mergev3To   = flag.String("mergev3_to", "", "")
 	cpu         = flag.Int("cpu", 1, "cpu count")
 )
 
@@ -113,6 +118,11 @@ func main() {
 	case "merge_v2":
 		storage.SetDedupInterval(*minScrapeInterval)
 		mergev2.Merge(strings.Split(*mergev2From, ","), *mergev2To)
+	case "merge_v3":
+		storage.SetDedupInterval(*minScrapeInterval)
+		mergev3.Merge(strings.Split(*mergev3From, ","), *mergev3To)
+	case "table_search":
+		tablesearch.TableSearch(strings.Split(*mergev3From, ","))
 	default:
 		logger.Panicf("unknown action:%s", *action)
 	}
