@@ -60,6 +60,18 @@ func BenchmarkUnmarshalInt64(b *testing.B) {
 	})
 }
 
+/*
+BenchmarkMarshalVarInt64s/up-to-(1<<6)-1-10              1724980               775.6 ns/op      10314.17 MB/s          0 B/op          0 allocs/op
+=== RUN   BenchmarkMarshalVarInt64s/up-to-(1<<13)-1
+BenchmarkMarshalVarInt64s/up-to-(1<<13)-1
+BenchmarkMarshalVarInt64s/up-to-(1<<13)-1-10              559910              1849 ns/op        4327.42 MB/s           1 B/op          0 allocs/op
+=== RUN   BenchmarkMarshalVarInt64s/up-to-(1<<27)-1
+BenchmarkMarshalVarInt64s/up-to-(1<<27)-1
+BenchmarkMarshalVarInt64s/up-to-(1<<27)-1-10              342729              3594 ns/op        2225.66 MB/s           4 B/op          0 allocs/op
+=== RUN   BenchmarkMarshalVarInt64s/up-to-(1<<63)-1
+BenchmarkMarshalVarInt64s/up-to-(1<<63)-1
+BenchmarkMarshalVarInt64s/up-to-(1<<63)-1-10              220304              5447 ns/op        1468.63 MB/s          17 B/op          0 allocs/op
+*/
 func BenchmarkMarshalVarInt64s(b *testing.B) {
 	b.Run("up-to-(1<<6)-1", func(b *testing.B) {
 		benchmarkMarshalVarInt64s(b, (1<<6)-1)

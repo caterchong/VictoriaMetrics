@@ -313,3 +313,40 @@ func testMarshalUnmarshalBytes(t *testing.T, s string) {
 		t.Fatalf("unexpected b for s=%q; got\n%x; expecting\n%x", s, b1[len(prefix):], b)
 	}
 }
+
+func Test_MarshalVarInt64s_1(t *testing.T) {
+	var dst [1024]byte
+	var dst2 [1024]byte
+	var values [1]int64
+	prevLen := 0
+	for i := 0; i < 1048576+1; i++ {
+		values[0] = int64(i)
+		result := MarshalVarInt64s(dst[:0], values[:1])
+		if len(result) != prevLen {
+			prevLen = len(result)
+			t.Logf("MarshalVarInt64s len=%d, value=%d, result=%X", prevLen, i, result)
+		}
+		result2 := MarshalVarInt64BySearchTable(dst2[:0], int64(i))
+		if !bytes.Equal(result, result2) {
+			t.Errorf("MarshalVarInt64BySearchTable error")
+			return
+		}
+	}
+}
+
+func Test_MarshalVarInt64s_2(t *testing.T) {
+	var dst [1024]byte
+	//var dst2 [1024]byte
+	var values [1]int64
+	prevLen := 0
+	var cnt int
+	for i := -1; i > -10000000; i-- {
+		cnt++
+		values[0] = int64(i)
+		result := MarshalVarInt64s(dst[:0], values[:1])
+		if len(result) != prevLen {
+			prevLen = len(result)
+			t.Logf("MarshalVarInt64s len=%d, value=%d(%d), result=%X", prevLen, i, cnt, result)
+		}
+	}
+}

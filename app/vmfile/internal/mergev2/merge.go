@@ -2,6 +2,7 @@ package mergev2
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -19,15 +20,18 @@ import (
 func Merge(fromPaths []string, toPath string) {
 	if len(fromPaths) < 1 {
 		logger.Errorf("from path count must great 0")
+		os.Exit(1)
 		return
 	}
 	for _, p := range fromPaths {
 		if !fs.IsPathExist(p) {
 			logger.Errorf("from path %s not exists", p)
+			os.Exit(2)
 			return
 		}
 	}
 	if len(fromPaths) > 1 && simplemerge.CheckMetricIDDuplicate(fromPaths) {
+		os.Exit(3)
 		return
 	}
 	ts := uint64(time.Now().UnixNano())

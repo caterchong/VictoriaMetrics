@@ -87,7 +87,7 @@ func MarshalTimestamps(dst []byte, timestamps []int64, precisionBits uint8) (res
 // and returns the resulting dst.
 //
 // firstTimestamp must be the timestamp returned from MarshalTimestamps.
-func UnmarshalTimestamps(dst []int64, src []byte, mt MarshalType, firstTimestamp int64, itemsCount int) ([]int64, error) {
+func UnmarshalTimestamps(dst []int64, src []byte, mt MarshalType, firstTimestamp int64, itemsCount int) ([]int64, error) {  // 这个函数也是热点
 	dst, err := unmarshalInt64Array(dst, src, mt, firstTimestamp, itemsCount)
 	if err != nil {
 		return nil, fmt.Errorf("cannot unmarshal %d timestamps from len(src)=%d bytes: %w", itemsCount, len(src), err)
@@ -116,7 +116,7 @@ func UnmarshalValues(dst []int64, src []byte, mt MarshalType, firstValue int64, 
 	return dst, nil
 }
 
-func marshalInt64Array(dst []byte, a []int64, precisionBits uint8) (result []byte, mt MarshalType, firstValue int64) {
+func marshalInt64Array(dst []byte, a []int64, precisionBits uint8) (result []byte, mt MarshalType, firstValue int64) {  // 这个函数大量调用，值得优化
 	if len(a) == 0 {
 		logger.Panicf("BUG: a must contain at least one item")
 	}
@@ -312,8 +312,8 @@ func isDeltaConst(a []int64) bool {
 	if len(a) < 2 {
 		return false
 	}
-	d1 := a[1] - a[0]
-	prev := a[1]
+	d1 := a[1] - a[0]  // 差值
+	prev := a[1]  // 前一个值
 	for _, next := range a[2:] {
 		if next-prev != d1 {
 			return false

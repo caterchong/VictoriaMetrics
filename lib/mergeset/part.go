@@ -131,7 +131,7 @@ func (p *PartReader) Close() {
 	p.LensFile.MustClose()
 }
 
-func (p *PartReader) readInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) { // 从磁盘读取一个块
+func (p *PartReader) readInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) { // 从磁盘读取一个块  // todo: ib 应该要放在 cache 里面
 	p.sb.Reset()
 	var sb storageBlock
 	sb.Reset()

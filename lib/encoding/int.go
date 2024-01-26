@@ -79,7 +79,7 @@ func MarshalVarInt64(dst []byte, v int64) []byte {
 }
 
 // MarshalVarInt64s appends marshaled vs to dst and returns the result.
-func MarshalVarInt64s(dst []byte, vs []int64) []byte {
+func MarshalVarInt64s(dst []byte, vs []int64) []byte { // 这个函数很慢
 	for _, v := range vs {
 		if v < 0x40 && v > -0x40 {
 			// Fast path
@@ -100,6 +100,70 @@ func MarshalVarInt64s(dst []byte, vs []int64) []byte {
 	return dst
 }
 
+func MarshalVarInt64BySearchTable(dst []byte, v int64) []byte {
+	if v <= ValueOf1Byte {
+		return append(dst, MarshalVarInt64sTable[v])
+	}
+	if v <= ValueOf2Byte {
+		idx := (ValueOf1Byte + 1) + (v-(ValueOf1Byte+1))*2
+		return append(dst, MarshalVarInt64sTable[idx:idx+2]...)
+	}
+	if v <= ValueOf3Byte {
+		idx := (ValueOf1Byte + 1) + (ValueOf2Byte-ValueOf1Byte)*2 + (v-(ValueOf2Byte+1))*3
+		return append(dst, MarshalVarInt64sTable[idx:idx+3]...)
+	}
+	var arr [1]int64
+	arr[0] = v
+	return MarshalVarInt64s(dst, arr[:1])
+}
+
+func MarshalVarInt64sBySearchTable(dst []byte, vs []int64) []byte {
+	var arr [1]int64
+	for _, v := range vs {
+		if v >= 0 {
+			if v <= ValueOf1Byte {
+				dst = append(dst, MarshalVarInt64sTable[v])
+				continue
+			}
+			if v <= ValueOf2Byte {
+				idx := (ValueOf1Byte + 1) + (v-(ValueOf1Byte+1))*2
+				dst = append(dst, MarshalVarInt64sTable[idx:idx+2]...)
+				continue
+			}
+			if v <= ValueOf3Byte {
+				idx := (ValueOf1Byte + 1) + (ValueOf2Byte-ValueOf1Byte)*2 + (v-(ValueOf2Byte+1))*3
+				dst = append(dst, MarshalVarInt64sTable[idx:idx+3]...)
+				continue
+			}
+		}
+		arr[0] = v
+		dst = MarshalVarInt64s(dst, arr[:1])
+	}
+	return dst
+}
+
+const (
+	ValueOf1Byte    = 64 - 1
+	ValueOf2Byte    = 8192 - 1
+	ValueOf3Byte    = 1048576 - 1
+	totalTableBytes = (ValueOf1Byte+1)*1 + (ValueOf2Byte-ValueOf1Byte)*2 + (ValueOf3Byte-ValueOf2Byte)*3
+	// 64 + (8192 - 64)*2 + (1048576-8192)*3 = 3137472 => 2.99 mb
+)
+
+var MarshalVarInt64sTable []byte = func() []byte {
+	//
+	table := make([]byte, 0, totalTableBytes)
+	var values [1]int64
+	for i := 0; i < ValueOf3Byte+1; i++ {
+		values[0] = int64(i)
+		table = MarshalVarInt64s(table, values[:1])
+	}
+	if len(table) != totalTableBytes {
+		panic("error")
+	}
+	return table
+}()
+
 // UnmarshalVarInt64 returns unmarshaled int64 from src and returns
 // the remaining tail from src.
 func UnmarshalVarInt64(src []byte) ([]byte, int64, error) {
@@ -110,9 +174,9 @@ func UnmarshalVarInt64(src []byte) ([]byte, int64, error) {
 
 // UnmarshalVarInt64s unmarshals len(dst) int64 values from src to dst
 // and returns the remaining tail from src.
-func UnmarshalVarInt64s(dst []int64, src []byte) ([]byte, error) {
+func UnmarshalVarInt64s(dst []int64, src []byte) ([]byte, error) { // 这一个函数占了 1%， 需要优化 !!!
 	idx := uint(0)
-	for i := range dst {
+	for i := range dst { // 解码多少个 int64
 		if idx >= uint(len(src)) {
 			return nil, fmt.Errorf("cannot unmarshal varint from empty data")
 		}

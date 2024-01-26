@@ -45,6 +45,7 @@ func marshalInt64NearestDelta2(dst []byte, src []int64, precisionBits uint8) (re
 		}
 	}
 	dst = MarshalVarInt64s(dst, is.A)
+	//dst = MarshalVarInt64sBySearchTable(dst, is.A)  // 这个东西不是用来编码字符串长度的。就是为了编码 int 本身。所以查表没有用
 	PutInt64s(is)
 	return dst, firstValue
 }
