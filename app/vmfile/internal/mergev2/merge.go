@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/reindex"
 	"github.com/VictoriaMetrics/VictoriaMetrics/app/vmfile/internal/simplemerge"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/cgroup"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/mergeset"
@@ -60,34 +60,14 @@ func Merge(fromPaths []string, toPath string, retentionDeadline string) {
 		}()
 		go func() {
 			defer wg.Done()
-			mergeIndex(fromPaths, toPath, &ts)
+			mergeIndex(fromPaths, toPath, &ts, retentionDeadlineMilli)
 		}()
 		wg.Wait()
 	} else {
-		mergeIndex(fromPaths, toPath, &ts)
+		mergeIndex(fromPaths, toPath, &ts, retentionDeadlineMilli)
 		mergeData(fromPaths, toPath, &ts, retentionDeadlineMilli)
 	}
 }
-
-// func MergeDataV2(fromPaths []string, toPath string) {
-// 	if len(fromPaths) < 1 {
-// 		logger.Errorf("from path count must great 0")
-// 		return
-// 	}
-// 	for _, p := range fromPaths {
-// 		if !fs.IsPathExist(p) {
-// 			logger.Errorf("from path %s not exists", p)
-// 			return
-// 		}
-// 	}
-// 	//fs.MustMkdirIfNotExist(toPath)
-// 	ts := time.Now().UnixNano()
-// 	dstPartitionDir := filepath.Join(toPath, storage.DataDirname, "big")
-// 	fs.MustMkdirIfNotExist(dstPartitionDir)
-// 	fs.MustMkdirIfNotExist(filepath.Join(toPath, storage.DataDirname, "small"))
-// 	mergeData(fromPaths, dstPartitionDir, &ts)
-// 	fmt.Printf("OK\n")
-// }
 
 func mergeData(fromPaths []string, toPath string, ts *uint64, retentionDeadline int64) {
 	dstPartitionDir := filepath.Join(toPath, storage.DataDirname, "big")
@@ -134,7 +114,7 @@ func mergeData(fromPaths []string, toPath string, ts *uint64, retentionDeadline 
 	fmt.Printf("Merge data ok\n")
 }
 
-func mergeIndex(fromPaths []string, toPath string, ts *uint64) {
+func mergeIndex(fromPaths []string, toPath string, ts *uint64, retentionDeadline int64) {
 	dstPrevTable := filepath.Join(toPath, storage.IndexdbDirname, fmt.Sprintf("%016X", atomic.AddUint64(ts, 1)))
 	fs.MustMkdirIfNotExist(dstPrevTable)
 	//
@@ -172,78 +152,37 @@ func mergeIndex(fromPaths []string, toPath string, ts *uint64) {
 		logger.Errorf("not have any dir to merge")
 		return
 	}
-	//
-	index1Filter := reindex.NewFilterForTagIndex()
-	index2Filter := reindex.NewFilterForMetricIDIndex()
-	index3Filter := reindex.NewFilterForMetricIDIndex()
-	index5Filter := reindex.NewFilterForDateToMetricIDIndex()
-	index6Filter := reindex.NewFilterForDateAndTagToMetricIDIndex()
-	index7Filter := reindex.NewFilterForDateAndMetricNameIndex()
 
-	prepareBlockCallback := func(alldata []byte, items []mergeset.Item) ([]byte, []mergeset.Item) {
+	//换成秒，精确到天
+	retentionDate := ((retentionDeadline / 1000) + 86399) / 86400
+
+	skipCount := 0
+	// 对于index来说，所谓陈旧index，只是带有Date的Index， Date日期在指定的retentionDeadline之前的需要删除
+	removeStaleDateIndex := func(alldata []byte, items []mergeset.Item) ([]byte, []mergeset.Item) {
 		idx := 0
+		newItems := items[:0]
 		for idx < len(items) {
 			cur := items[idx].Bytes(alldata)
 			indexType := cur[0]
-			//
-			switch indexType {
-			case storage.NsPrefixTagToMetricIDs:
-				if index1Filter.IsSkip(cur) {
-					items = append(items[:idx], items[idx+1:]...)
-					index1Filter.SkipCount++
+			if indexType == storage.NsPrefixDateToMetricID || indexType == storage.NsPrefixDateTagToMetricIDs || indexType == storage.NsPrefixDateMetricNameToTSID {
+				date := encoding.UnmarshalUint64(cur[9:])
+				if date < uint64(retentionDate) {
+					skipCount++
+					idx++
 					continue
 				}
-				index1Filter.AddCount++
-			case storage.NsPrefixMetricIDToTSID:
-				if index2Filter.IsSkip(cur) {
-					items = append(items[:idx], items[idx+1:]...)
-					index2Filter.SkipCount++
-					continue
-				}
-				index2Filter.AddCount++
-			case storage.NsPrefixMetricIDToMetricName:
-				if index3Filter.IsSkip(cur) {
-					items = append(items[:idx], items[idx+1:]...)
-					index3Filter.SkipCount++
-					continue
-				}
-				index3Filter.AddCount++
-			case storage.NsPrefixDateToMetricID:
-				if index5Filter.IsSkip(cur) {
-					items = append(items[:idx], items[idx+1:]...)
-					index5Filter.SkipCount++
-					continue
-				}
-				index5Filter.AddCount++
-			case storage.NsPrefixDateTagToMetricIDs:
-				if index6Filter.IsSkip(cur) {
-					items = append(items[:idx], items[idx+1:]...)
-					index6Filter.SkipCount++
-					continue
-				}
-				index6Filter.AddCount++
-			case storage.NsPrefixDateMetricNameToTSID:
-				if index7Filter.IsSkip(cur) {
-					items = append(items[:idx], items[idx+1:]...)
-					index7Filter.SkipCount++
-					continue
-				}
-				index7Filter.AddCount++
 			}
+			newItems = append(newItems, items[idx])
 			idx++
 		}
-		return alldata, items
+		return alldata, newItems
 	}
+
 	mergeset.MergePartsByPartDirs("", dirs,
 		dstPartDir,
-		prepareBlockCallback,
+		removeStaleDateIndex,
 		nil,
 	)
 	fmt.Printf("Merge Index OK\n")
-	fmt.Printf("\tindex 1: add %d, skip %d\n", index1Filter.AddCount, index1Filter.SkipCount)
-	fmt.Printf("\tindex 2: add %d, skip %d\n", index2Filter.AddCount, index2Filter.SkipCount)
-	fmt.Printf("\tindex 3: add %d, skip %d\n", index3Filter.AddCount, index3Filter.SkipCount)
-	fmt.Printf("\tindex 5: add %d, skip %d\n", index5Filter.AddCount, index5Filter.SkipCount)
-	fmt.Printf("\tindex 6: add %d, skip %d\n", index6Filter.AddCount, index6Filter.SkipCount)
-	fmt.Printf("\tindex 7: add %d, skip %d\n", index7Filter.AddCount, index7Filter.SkipCount)
+	fmt.Printf("\tindex skip %d\n", skipCount)
 }
