@@ -54,6 +54,9 @@ var (
 	mergev3From = flag.String("mergev3_from", "", "Multiple storage paths separated by commas")
 	mergev3To   = flag.String("mergev3_to", "", "")
 	cpu         = flag.Int("cpu", 1, "cpu count")
+
+	// -action=mergeV2的参数列表，合并的时候，retention_deadline之前的数据会被丢弃，为空则不起作用
+	retentionDeadline = flag.String("retention_deadline", "", `no limit if empty, should be a timestamp like "2021-07-01 00:00:00"`)
 )
 
 func main() {
@@ -117,7 +120,7 @@ func main() {
 		mergedatav2.MergeDataV2(strings.Split(*mergeDataV2From, ","), *mergeDataV2To)
 	case "merge_v2":
 		storage.SetDedupInterval(*minScrapeInterval)
-		mergev2.Merge(strings.Split(*mergev2From, ","), *mergev2To)
+		mergev2.Merge(strings.Split(*mergev2From, ","), *mergev2To, *retentionDeadline)
 	case "merge_v3":
 		storage.SetDedupInterval(*minScrapeInterval)
 		mergev3.Merge(strings.Split(*mergev3From, ","), *mergev3To)

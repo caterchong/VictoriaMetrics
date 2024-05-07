@@ -65,7 +65,7 @@ func mergeData(fromPaths []string, dstPartitionDir string, ts *int64) {
 				partDirs = append(partDirs, partDir) // 以月份归类的源数据目录
 			}
 		}
-		if err := storage.Merge(partDirs, dstPartDir); err != nil {
+		if err := storage.Merge(partDirs, dstPartDir, 0); err != nil {
 			logger.Panicf("merge error, err=%w", err)
 		}
 	}

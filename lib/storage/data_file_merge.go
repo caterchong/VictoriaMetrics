@@ -3,7 +3,6 @@ package storage
 import (
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
@@ -15,7 +14,7 @@ const (
 
 // 从多个 part 目录打开数据文件
 // partDirs 一定要传入同一个月份分区的数据
-func Merge(partDirs []string, dstPartPath string) error {
+func Merge(partDirs []string, dstPartPath string, retentionDeadline int64) error {
 	bsrs := make([]*blockStreamReader, 0, len(partDirs))
 	for _, p := range partDirs {
 		bsr := getBlockStreamReader()
@@ -26,7 +25,7 @@ func Merge(partDirs []string, dstPartPath string) error {
 	bsw.MustInitFromFilePart(dstPartPath, true, BestZstdCompressLevel)
 	//
 	stopCh := make(chan struct{})
-	ph, err := mergePartsInternalForFile(dstPartPath, bsw, bsrs, stopCh)
+	ph, err := mergePartsInternalForFile(dstPartPath, bsw, bsrs, stopCh, retentionDeadline)
 	putBlockStreamWriter(bsw)
 	for _, bsr := range bsrs {
 		putBlockStreamReader(bsr)
@@ -34,23 +33,34 @@ func Merge(partDirs []string, dstPartPath string) error {
 	if err != nil {
 		return err
 	}
-	fs.MustSyncPath(dstPartPath)
-	logger.Infof("%+v", ph)
+	if ph.RowsCount > 0 {
+		fs.MustSyncPath(dstPartPath)
+		logger.Infof("%+v", ph)
+	} else {
+		fs.MustRemoveAll(dstPartPath)
+		logger.Infof("no data, so remove dir %s", dstPartPath)
+	}
+
+	// if no data, the ph info will crash storage when reading
 	return nil
 }
 
 func mergePartsInternalForFile(dstPartPath string, bsw *blockStreamWriter,
 	bsrs []*blockStreamReader,
-	stopCh <-chan struct{}) (*partHeader, error) {
+	stopCh <-chan struct{}, retentionDeadline int64) (*partHeader, error) {
 	var ph partHeader
 	var rowsMerged uint64
 	var rowsDeleted uint64
-	retentionDeadline := time.Now().UnixMilli() - 1000*60*60*24*365*50 // 50 年
+	//retentionDeadline := time.Now().UnixMilli() - 1000*60*60*24*365*50 // 50 年
 	err := mergeBlockStreamsForFile(&ph, bsw, bsrs, stopCh, retentionDeadline, &rowsMerged, &rowsDeleted)
 	if err != nil {
 		return nil, fmt.Errorf("cannot merge %d parts to %s: %w", len(bsrs), dstPartPath, err)
+	} else {
+		logger.Infof("merge %d parts to %s, rowsMerged=%d, rowsDeleted=%d", len(bsrs), dstPartPath, rowsMerged, rowsDeleted)
 	}
+
 	ph.MustWriteMetadata(dstPartPath)
+
 	return &ph, nil
 }
 

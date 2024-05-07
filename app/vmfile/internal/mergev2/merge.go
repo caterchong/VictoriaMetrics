@@ -17,12 +17,26 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/storage"
 )
 
-func Merge(fromPaths []string, toPath string) {
+// convert from "2020-01-01 00:00:00" to unix timestamp
+func convertTimeToUnix(timeStr string) int64 {
+	if timeStr == "" {
+		return 0
+	}
+	t, err := time.Parse("2006-01-02 15:04:05", timeStr)
+	if err != nil {
+		logger.Errorf("parse time error: %s", err)
+		os.Exit(1)
+	}
+	return t.UnixMilli()
+}
+
+func Merge(fromPaths []string, toPath string, retentionDeadline string) {
 	if len(fromPaths) < 1 {
 		logger.Errorf("from path count must great 0")
 		os.Exit(1)
 		return
 	}
+	retentionDeadlineMilli := convertTimeToUnix(retentionDeadline)
 	for _, p := range fromPaths {
 		if !fs.IsPathExist(p) {
 			logger.Errorf("from path %s not exists", p)
@@ -30,17 +44,19 @@ func Merge(fromPaths []string, toPath string) {
 			return
 		}
 	}
+	logger.Infof("retention deadline: %d, topath:%s", retentionDeadlineMilli, toPath)
 	if len(fromPaths) > 1 && simplemerge.CheckMetricIDDuplicate(fromPaths) {
 		os.Exit(3)
 		return
 	}
+
 	ts := uint64(time.Now().UnixNano())
 	if cgroup.AvailableCPUs() > 1 {
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			mergeData(fromPaths, toPath, &ts)
+			mergeData(fromPaths, toPath, &ts, retentionDeadlineMilli)
 		}()
 		go func() {
 			defer wg.Done()
@@ -49,7 +65,7 @@ func Merge(fromPaths []string, toPath string) {
 		wg.Wait()
 	} else {
 		mergeIndex(fromPaths, toPath, &ts)
-		mergeData(fromPaths, toPath, &ts)
+		mergeData(fromPaths, toPath, &ts, retentionDeadlineMilli)
 	}
 }
 
@@ -73,7 +89,7 @@ func Merge(fromPaths []string, toPath string) {
 // 	fmt.Printf("OK\n")
 // }
 
-func mergeData(fromPaths []string, toPath string, ts *uint64) {
+func mergeData(fromPaths []string, toPath string, ts *uint64, retentionDeadline int64) {
 	dstPartitionDir := filepath.Join(toPath, storage.DataDirname, "big")
 	fs.MustMkdirIfNotExist(dstPartitionDir)
 	fs.MustMkdirIfNotExist(filepath.Join(toPath, storage.DataDirname, "small"))
@@ -111,7 +127,7 @@ func mergeData(fromPaths []string, toPath string, ts *uint64) {
 				partDirs = append(partDirs, partDir) // 以月份归类的源数据目录
 			}
 		}
-		if err := storage.Merge(partDirs, dstPartDir); err != nil {
+		if err := storage.Merge(partDirs, dstPartDir, retentionDeadline); err != nil {
 			logger.Panicf("merge error, err=%w", err)
 		}
 	}
