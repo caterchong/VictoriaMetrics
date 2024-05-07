@@ -137,6 +137,9 @@ again:
 		if hasNextItem && string(item) > nextItem {
 			break
 		}
+		if string(item) == nextItem {
+			goto NextRecord //remove duplicate record, important for merge
+		}
 		if bsm.checker != nil && bsm.checker(item) { // 此回调用于跳过某些记录  // ??? 没找到 bug 原因，仍然非常奇怪
 			//bsr.currItemIdx++
 			// if item[0] == 3 {
