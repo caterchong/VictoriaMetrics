@@ -134,6 +134,7 @@ func (bsw *blockStreamWriter) MustClose() {
 func (bsw *blockStreamWriter) WriteExternalBlock(b *Block, ph *partHeader, rowsMerged *atomic.Uint64) {
 	rowsMerged.Add(uint64(b.rowsCount()))
 	b.deduplicateSamplesDuringMerge()
+	// headerData 是 blockHeader 序列化以后的内容
 	headerData, timestampsData, valuesData := b.MarshalData(bsw.timestampsBlockOffset, bsw.valuesBlockOffset)
 
 	usePrevTimestamps := len(bsw.prevTimestampsData) > 0 && bytes.Equal(timestampsData, bsw.prevTimestampsData)
@@ -150,7 +151,9 @@ func (bsw *blockStreamWriter) WriteExternalBlock(b *Block, ph *partHeader, rowsM
 	}
 	bsw.indexData = append(bsw.indexData, headerData...)
 	bsw.mr.RegisterBlockHeader(&b.bh)
-
+	if len(bsw.indexData) >= maxBlockSize { // blockHeader 序列化后的长度超过 64 kb 后，产生一个新的 metaIndexRow
+		bsw.flushIndexData()
+	}
 	if !usePrevTimestamps {
 		bsw.prevTimestampsData = append(bsw.prevTimestampsData[:0], timestampsData...)
 		bsw.prevTimestampsBlockOffset = bsw.timestampsBlockOffset

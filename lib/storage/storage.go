@@ -241,12 +241,12 @@ func MustOpenStorage(path string, retention time.Duration, maxHourlySeries, maxD
 
 	// Load metadata
 	metadataDir := filepath.Join(path, metadataDirname)
-	isEmptyDB := !fs.IsPathExist(filepath.Join(path, indexdbDirname))
+	isEmptyDB := !fs.IsPathExist(filepath.Join(path, IndexdbDirname))
 	fs.MustMkdirIfNotExist(metadataDir)
 	s.minTimestampForCompositeIndex = mustGetMinTimestampForCompositeIndex(metadataDir, isEmptyDB)
 
 	// Load indexdb
-	idbPath := filepath.Join(path, indexdbDirname)
+	idbPath := filepath.Join(path, IndexdbDirname)
 	idbSnapshotsPath := filepath.Join(idbPath, snapshotsDirname)
 	fs.MustMkdirIfNotExist(idbSnapshotsPath)
 	fs.MustRemoveTemporaryDirs(idbSnapshotsPath)
@@ -389,7 +389,7 @@ func (s *Storage) CreateSnapshot() (string, error) {
 	dstMetadataDir := filepath.Join(dstDir, metadataDirname)
 	fs.MustCopyDirectory(srcMetadataDir, dstMetadataDir)
 
-	idbSnapshot := filepath.Join(srcDir, indexdbDirname, snapshotsDirname, snapshotName)
+	idbSnapshot := filepath.Join(srcDir, IndexdbDirname, snapshotsDirname, snapshotName)
 	idb := s.idb()
 	currSnapshot := filepath.Join(idbSnapshot, idb.name)
 	if err := idb.tb.CreateSnapshotAt(currSnapshot); err != nil {
@@ -405,7 +405,7 @@ func (s *Storage) CreateSnapshot() (string, error) {
 	if ok && err != nil {
 		return "", fmt.Errorf("cannot create prev indexDB snapshot: %w", err)
 	}
-	dstIdbDir := filepath.Join(dstDir, indexdbDirname)
+	dstIdbDir := filepath.Join(dstDir, IndexdbDirname)
 	fs.MustSymlinkRelative(idbSnapshot, dstIdbDir)
 
 	fs.MustSyncPath(dstDir)
@@ -458,7 +458,7 @@ func (s *Storage) DeleteSnapshot(snapshotName string) error {
 	startTime := time.Now()
 
 	s.tb.MustDeleteSnapshot(snapshotName)
-	idbPath := filepath.Join(s.path, indexdbDirname, snapshotsDirname, snapshotName)
+	idbPath := filepath.Join(s.path, IndexdbDirname, snapshotsDirname, snapshotName)
 	fs.MustRemoveDirAtomic(idbPath)
 	fs.MustRemoveDirAtomic(snapshotPath)
 
@@ -800,7 +800,7 @@ func (s *Storage) nextDayMetricIDsUpdater() {
 func (s *Storage) mustRotateIndexDB(currentTime time.Time) {
 	// Create new indexdb table, which will be used as idbNext
 	newTableName := nextIndexDBTableName()
-	idbNewPath := filepath.Join(s.path, indexdbDirname, newTableName)
+	idbNewPath := filepath.Join(s.path, IndexdbDirname, newTableName)
 	idbNew := mustOpenIndexDB(idbNewPath, s, &s.isReadOnly)
 
 	// Update nextRotationTimestamp
@@ -1390,7 +1390,7 @@ func filterLabelValues(accountID, projectID uint32, lvs []string, tf *tagFilter,
 	var b []byte
 	result := lvs[:0]
 	for _, lv := range lvs {
-		b = marshalCommonPrefix(b[:0], nsPrefixTagToMetricIDs, accountID, projectID)
+		b = marshalCommonPrefix(b[:0], NsPrefixTagToMetricIDs, accountID, projectID)
 		b = marshalTagValue(b, bytesutil.ToUnsafeBytes(key))
 		b = marshalTagValue(b, bytesutil.ToUnsafeBytes(lv))
 		ok, err := tf.match(b)
@@ -2227,7 +2227,7 @@ func (s *Storage) prefillNextIndexDB(rows []rawRow, mrs []*MetricRow) error {
 	return firstError
 }
 
-func (s *Storage) updatePerDateData(rows []rawRow, mrs []*MetricRow) error {
+func (s *Storage) updatePerDateData(rows []rawRow, mrs []*MetricRow) error { // 更新按照日期建立的索引
 	var date uint64
 	var hour uint64
 	var prevTimestamp int64
@@ -2260,7 +2260,7 @@ func (s *Storage) updatePerDateData(rows []rawRow, mrs []*MetricRow) error {
 	for i := range rows {
 		r := &rows[i]
 		if r.Timestamp != prevTimestamp {
-			date = uint64(r.Timestamp) / msecPerDay
+			date = uint64(r.Timestamp) / msecPerDay // 这个值是  1970 年开始的天数
 			hour = uint64(r.Timestamp) / msecPerHour
 			prevTimestamp = r.Timestamp
 		}
@@ -2759,7 +2759,7 @@ func (s *Storage) putTSIDToCache(tsid *generationTSID, metricName []byte) {
 	s.tsidCache.Set(metricName, buf)
 }
 
-func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB) {
+func GetIndexDBTableNames(path string) (nextPath, currPath, prevPath string) {
 	fs.MustMkdirIfNotExist(path)
 	fs.MustRemoveTemporaryDirs(path)
 
@@ -2808,9 +2808,14 @@ func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB)
 	}
 
 	// Open tables
-	nextPath := filepath.Join(path, tableNames[2])
-	currPath := filepath.Join(path, tableNames[1])
-	prevPath := filepath.Join(path, tableNames[0])
+	nextPath = filepath.Join(path, tableNames[2])
+	currPath = filepath.Join(path, tableNames[1])
+	prevPath = filepath.Join(path, tableNames[0])
+	return
+}
+
+func (s *Storage) mustOpenIndexDBTables(path string) (next, curr, prev *indexDB) {
+	nextPath, currPath, prevPath := GetIndexDBTableNames(path)
 
 	next = mustOpenIndexDB(nextPath, s, &s.isReadOnly)
 	curr = mustOpenIndexDB(currPath, s, &s.isReadOnly)

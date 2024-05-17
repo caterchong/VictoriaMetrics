@@ -86,6 +86,39 @@ func (ib *inmemoryBlock) SortItems() {
 	}
 }
 
+func (ib *inmemoryBlock) CheckDuplicate() bool {
+	prev := ib.items[0].Bytes(ib.data)
+	for i := 1; i < ib.Len(); i++ {
+		cur := ib.items[i].Bytes(ib.data)
+		if len(prev) == len(cur) && bytes.Equal(prev, cur) {
+			return true
+		}
+		prev = cur
+	}
+	return false
+}
+
+func (ib *inmemoryBlock) DeDuplicate() int {
+	prev := ib.items[0].Bytes(ib.data)
+	idx := 1
+	dupCount := 0
+	for idx < ib.Len() {
+		cur := ib.items[idx].Bytes(ib.data)
+		if len(prev) == len(cur) && bytes.Equal(prev, cur) {
+			// 继续找，直到都不相等
+			// for j := idx; j < ib.Len(); j++ {
+			// 	temp := ib.items[j].Bytes(ib.data)
+			// }
+			ib.items = append(ib.items[:idx], ib.items[idx+1:]...)
+			dupCount++
+		} else {
+			prev = cur
+			idx++
+		}
+	}
+	return dupCount
+}
+
 func (ib *inmemoryBlock) SizeBytes() int {
 	return int(unsafe.Sizeof(*ib)) + cap(ib.commonPrefix) + cap(ib.data) + cap(ib.items)*int(unsafe.Sizeof(Item{}))
 }
@@ -134,7 +167,7 @@ func (ib *inmemoryBlock) updateCommonPrefixUnsorted() {
 	ib.commonPrefix = append(ib.commonPrefix[:0], cp...)
 }
 
-func commonPrefixLen(a, b []byte) int {
+func commonPrefixLen(a, b []byte) int { // 找两个串的公共长度
 	i := 0
 	if len(a) > len(b) {
 		for i < len(b) && a[i] == b[i] {

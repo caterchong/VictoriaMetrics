@@ -92,6 +92,9 @@ func (ts *TableSearch) Seek(k []byte) {
 	ts.psHeap = ts.psHeap[:0]
 	for i := range ts.psPool {
 		ps := &ts.psPool[i]
+		// defer func() {
+		// 	logger.Infof("ps load count: %d", ps.loadBlockCount)
+		// }()
 		ps.Seek(k)
 		if !ps.NextItem() {
 			if err := ps.Error(); err != nil {
@@ -101,7 +104,7 @@ func (ts *TableSearch) Seek(k []byte) {
 			}
 			continue
 		}
-		ts.psHeap = append(ts.psHeap, ps)
+		ts.psHeap = append(ts.psHeap, ps) // 如果只有 1 个 part，则这里的长度就是 1
 	}
 	if len(ts.psHeap) == 0 {
 		ts.err = io.EOF
@@ -109,7 +112,8 @@ func (ts *TableSearch) Seek(k []byte) {
 	}
 	heap.Init(&ts.psHeap)
 	ts.Item = ts.psHeap[0].Item
-	ts.nextItemNoop = true
+	//logger.Infof("ts.psHeap len=%d", len(ts.psHeap))
+	ts.nextItemNoop = true // 初始化的时候，游标里面已经装载了一条数据
 }
 
 // FirstItemWithPrefix seeks for the first item with the given prefix in the ts.

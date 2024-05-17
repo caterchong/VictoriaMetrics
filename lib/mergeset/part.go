@@ -1,11 +1,15 @@
 package mergeset
 
 import (
+	"bytes"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"unsafe"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/blockcache"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/filestream"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
@@ -65,6 +69,65 @@ type part struct {
 	indexFile fs.MustReadAtCloser
 	itemsFile fs.MustReadAtCloser
 	lensFile  fs.MustReadAtCloser
+}
+
+type PartReader struct {
+	PartHeader    partHeader
+	Path          string
+	TableType     int8 // prev 还是 curr
+	MetaIndexRows []metaindexRow
+	BlockHeaders  [][]blockHeader
+	ItemsFile     *fs.ReaderAt
+	LensFile      *fs.ReaderAt
+	//
+	sb storageBlock
+}
+
+func NewPartReader(path string, tableType int8) (*PartReader, error) {
+	p := &PartReader{
+		Path:      path,
+		TableType: tableType,
+	}
+	p.PartHeader.MustReadMetadata(path)
+	metaindexBin, err := os.ReadFile(filepath.Join(path, metaindexFilename))
+	if err != nil {
+		return nil, fmt.Errorf("open metaindex.bin error, err=%w", err)
+	}
+	mrs, err := unmarshalMetaindexRows(nil, bytes.NewReader(metaindexBin))
+	if err != nil {
+		logger.Panicf("FATAL: cannot unmarshal metaindexRows from %q: %s", path, err)
+	}
+	p.MetaIndexRows = mrs
+	//
+	var indexBin []byte
+	indexBin, err = os.ReadFile(filepath.Join(path, indexFilename))
+	if err != nil {
+		return nil, fmt.Errorf("open index.bin error, err=%w", err)
+	}
+	var zstdBuf []byte
+	p.BlockHeaders = make([][]blockHeader, 0, len(mrs))
+	for _, mr := range mrs {
+		row := indexBin[mr.indexBlockOffset : mr.indexBlockOffset+uint64(mr.indexBlockSize)]
+		zstdBuf, err = encoding.DecompressZSTD(zstdBuf[:0], row)
+		if err != nil {
+			return nil, fmt.Errorf("DecompressZSTD index.bin error, err=%w", err)
+		}
+		var bhs []blockHeader
+		bhs, err = unmarshalBlockHeadersNoCopy(nil, zstdBuf, int(mr.blockHeadersCount))
+		if err != nil {
+			return nil, fmt.Errorf("unmarshalBlockHeadersNoCopy for index.bin error, err=%w", err)
+		}
+		p.BlockHeaders = append(p.BlockHeaders, bhs)
+	}
+	//
+	p.ItemsFile = fs.MustOpenReaderAt(filepath.Join(path, itemsFilename)) //todo: 为了减少全局的 io, 要为 block 对象建立 cache
+	p.LensFile = fs.MustOpenReaderAt(filepath.Join(path, lensFilename))
+	return p, nil
+}
+
+func (p *PartReader) Close() {
+	p.ItemsFile.MustClose()
+	p.LensFile.MustClose()
 }
 
 func mustOpenFilePart(path string) *part {
