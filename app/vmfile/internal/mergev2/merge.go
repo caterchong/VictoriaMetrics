@@ -117,6 +117,8 @@ func mergeData(fromPaths []string, toPath string, ts *uint64, retentionDeadline 
 func mergeIndex(fromPaths []string, toPath string, ts *uint64, retentionDeadline int64) {
 	dstPrevTable := filepath.Join(toPath, storage.IndexdbDirname, fmt.Sprintf("%016X", atomic.AddUint64(ts, 1)))
 	fs.MustMkdirIfNotExist(dstPrevTable)
+	fs.MustWriteSync(filepath.Join(dstPrevTable, ".placeholder"), []byte("just for placeholder")) // 不写这个文件，backup到s3丢失目录
+
 	//
 	dstPartDir := filepath.Join(toPath, storage.IndexdbDirname,
 		fmt.Sprintf("%016X", atomic.AddUint64(ts, 1)),
