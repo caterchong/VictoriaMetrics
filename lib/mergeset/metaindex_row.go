@@ -39,6 +39,16 @@ func (mr *metaindexRow) Marshal(dst []byte) []byte {
 	return dst
 }
 
+func (mr *metaindexRow) MarshalLen() uint64 {
+	var tempBuf [8]byte
+	firstItemLen := len(encoding.MarshalVarUint64(tempBuf[:0], uint64(len(mr.firstItem))))
+	return uint64(
+		firstItemLen + len(mr.firstItem) +
+			4 + //blockHeadersCount
+			8 + // indexBlockOffset
+			4) // indexBlockSize
+}
+
 func (mr *metaindexRow) Unmarshal(src []byte) ([]byte, error) {
 	// Unmarshal firstItem
 	tail, fi, err := encoding.UnmarshalBytes(src)

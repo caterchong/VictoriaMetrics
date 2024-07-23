@@ -153,7 +153,7 @@ func TestMergeTagToMetricIDsRows(t *testing.T) {
 	}
 	xy := func(nsPrefix byte, accountID, projectID uint32, key, value string, metricIDs []uint64) string {
 		dst := marshalCommonPrefix(nil, nsPrefix, accountID, projectID)
-		if nsPrefix == nsPrefixDateTagToMetricIDs {
+		if nsPrefix == NsPrefixDateTagToMetricIDs {
 			dst = encoding.MarshalUint64(dst, 1234567901233)
 		}
 		t := &Tag{
@@ -167,10 +167,10 @@ func TestMergeTagToMetricIDsRows(t *testing.T) {
 		return string(dst)
 	}
 	x := func(accountID, projectID uint32, key, value string, metricIDs []uint64) string {
-		return xy(nsPrefixTagToMetricIDs, accountID, projectID, key, value, metricIDs)
+		return xy(NsPrefixTagToMetricIDs, accountID, projectID, key, value, metricIDs)
 	}
 	y := func(accountID, projectID uint32, key, value string, metricIDs []uint64) string {
-		return xy(nsPrefixDateTagToMetricIDs, accountID, projectID, key, value, metricIDs)
+		return xy(NsPrefixDateTagToMetricIDs, accountID, projectID, key, value, metricIDs)
 	}
 
 	f(nil, nil)

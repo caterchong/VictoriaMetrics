@@ -265,7 +265,7 @@ func mustOpenPartition(smallPartsPath, bigPartsPath string, s *Storage) *partiti
 	smallParts := mustOpenParts(smallPartsPath, partNamesSmall)
 	bigParts := mustOpenParts(bigPartsPath, partNamesBig)
 
-	partNamesPath := filepath.Join(smallPartsPath, partsFilename)
+	partNamesPath := filepath.Join(smallPartsPath, PartsFilename)
 	if !fs.IsPathExist(partNamesPath) {
 		// Create parts.json file if it doesn't exist yet.
 		// This should protect from possible carshloops just after the migration from versions below v1.90.0
@@ -1768,7 +1768,7 @@ func mustOpenParts(path string, partNames []string) []*partWrapper {
 		// including unclean shutdown.
 		partPath := filepath.Join(path, partName)
 		if !fs.IsPathExist(partPath) {
-			partsFile := filepath.Join(path, partsFilename)
+			partsFile := filepath.Join(path, PartsFilename)
 			logger.Panicf("FATAL: part %q is listed in %q, but is missing on disk; "+
 				"ensure %q contents is not corrupted; remove %q to rebuild its' content from the list of existing parts",
 				partPath, partsFile, partsFile, partsFile)
@@ -1879,7 +1879,7 @@ func mustWritePartNames(pwsSmall, pwsBig []*partWrapper, dstDir string) {
 	if err != nil {
 		logger.Panicf("BUG: cannot marshal partNames to JSON: %s", err)
 	}
-	partNamesPath := filepath.Join(dstDir, partsFilename)
+	partNamesPath := filepath.Join(dstDir, PartsFilename)
 	fs.MustWriteAtomic(partNamesPath, data, true)
 }
 
@@ -1898,11 +1898,11 @@ func getPartNames(pws []*partWrapper) []string {
 }
 
 func mustReadPartNames(smallPartsPath, bigPartsPath string) ([]string, []string) {
-	partNamesPath := filepath.Join(smallPartsPath, partsFilename)
+	partNamesPath := filepath.Join(smallPartsPath, PartsFilename)
 	if fs.IsPathExist(partNamesPath) {
 		data, err := os.ReadFile(partNamesPath)
 		if err != nil {
-			logger.Panicf("FATAL: cannot read %s file: %s", partsFilename, err)
+			logger.Panicf("FATAL: cannot read %s file: %s", PartsFilename, err)
 		}
 		var partNames partNamesJSON
 		if err := json.Unmarshal(data, &partNames); err != nil {

@@ -207,7 +207,7 @@ func unmarshalAndCalibrateScale(b1, b2 *Block) error {
 		return err
 	}
 
-	scale := decimal.CalibrateScale(b1.values[b1.nextIdx:], b1.bh.Scale, b2.values[b2.nextIdx:], b2.bh.Scale)
+	scale := decimal.CalibrateScale(b1.values[b1.nextIdx:], b1.bh.Scale, b2.values[b2.nextIdx:], b2.bh.Scale)  // 这个是绝对的瓶颈
 	b1.bh.Scale = scale
 	b2.bh.Scale = scale
 	return nil

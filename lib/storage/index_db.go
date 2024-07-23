@@ -43,26 +43,26 @@ const (
 	//
 	// nsPrefixMetricNameToTSID = 0
 
-	// Prefix for Tag->MetricID entries.
-	nsPrefixTagToMetricIDs = 1
+	// Prefix for Tag->MetricID entries.  // 这里面又包含三种索引
+	NsPrefixTagToMetricIDs = 1
 
 	// Prefix for MetricID->TSID entries.
-	nsPrefixMetricIDToTSID = 2
+	NsPrefixMetricIDToTSID = 2
 
 	// Prefix for MetricID->MetricName entries.
-	nsPrefixMetricIDToMetricName = 3
+	NsPrefixMetricIDToMetricName = 3
 
 	// Prefix for deleted MetricID entries.
-	nsPrefixDeletedMetricID = 4
+	NsPrefixDeletedMetricID = 4
 
 	// Prefix for Date->MetricID entries.
-	nsPrefixDateToMetricID = 5
+	NsPrefixDateToMetricID = 5
 
 	// Prefix for (Date,Tag)->MetricID entries.
-	nsPrefixDateTagToMetricIDs = 6
+	NsPrefixDateTagToMetricIDs = 6
 
 	// Prefix for (Date,MetricName)->TSID entries.
-	nsPrefixDateMetricNameToTSID = 7
+	NsPrefixDateMetricNameToTSID = 7
 )
 
 // indexDB represents an index db.
@@ -544,19 +544,19 @@ func (is *indexSearch) createGlobalIndexes(tsid *TSID, mn *MetricName) {
 	defer putIndexItems(ii)
 
 	// Create MetricID -> MetricName index.
-	ii.B = marshalCommonPrefix(ii.B, nsPrefixMetricIDToMetricName, mn.AccountID, mn.ProjectID)
+	ii.B = marshalCommonPrefix(ii.B, NsPrefixMetricIDToMetricName, mn.AccountID, mn.ProjectID)
 	ii.B = encoding.MarshalUint64(ii.B, tsid.MetricID)
 	ii.B = mn.Marshal(ii.B)
 	ii.Next()
 
 	// Create MetricID -> TSID index.
-	ii.B = marshalCommonPrefix(ii.B, nsPrefixMetricIDToTSID, mn.AccountID, mn.ProjectID)
+	ii.B = marshalCommonPrefix(ii.B, NsPrefixMetricIDToTSID, mn.AccountID, mn.ProjectID)
 	ii.B = encoding.MarshalUint64(ii.B, tsid.MetricID)
 	ii.B = tsid.Marshal(ii.B)
 	ii.Next()
 
 	prefix := kbPool.Get()
-	prefix.B = marshalCommonPrefix(prefix.B[:0], nsPrefixTagToMetricIDs, mn.AccountID, mn.ProjectID)
+	prefix.B = marshalCommonPrefix(prefix.B[:0], NsPrefixTagToMetricIDs, mn.AccountID, mn.ProjectID)
 	ii.registerTagIndexes(prefix.B, mn, tsid.MetricID)
 	kbPool.Put(prefix)
 
@@ -701,9 +701,9 @@ func (is *indexSearch) searchLabelNamesWithFiltersOnDate(qt *querytracer.Tracer,
 	dmis := is.db.s.getDeletedMetricIDs()
 	loopsPaceLimiter := 0
 	underscoreNameSeen := false
-	nsPrefixExpected := byte(nsPrefixDateTagToMetricIDs)
+	nsPrefixExpected := byte(NsPrefixDateTagToMetricIDs)
 	if date == 0 {
-		nsPrefixExpected = nsPrefixTagToMetricIDs
+		nsPrefixExpected = NsPrefixTagToMetricIDs
 	}
 	kb.B = is.marshalCommonPrefixForDate(kb.B[:0], date)
 	prefix := kb.B
@@ -1029,9 +1029,9 @@ func (is *indexSearch) searchLabelValuesWithFiltersOnDate(qt *querytracer.Tracer
 	mp := &is.mp
 	dmis := is.db.s.getDeletedMetricIDs()
 	loopsPaceLimiter := 0
-	nsPrefixExpected := byte(nsPrefixDateTagToMetricIDs)
+	nsPrefixExpected := byte(NsPrefixDateTagToMetricIDs)
 	if date == 0 {
-		nsPrefixExpected = nsPrefixTagToMetricIDs
+		nsPrefixExpected = NsPrefixTagToMetricIDs
 	}
 	kb.B = is.marshalCommonPrefixForDate(kb.B[:0], date)
 	kb.B = marshalTagValue(kb.B, labelNameBytes)
@@ -1195,7 +1195,7 @@ func (is *indexSearch) searchTagValueSuffixesForTimeRange(tvss map[string]struct
 
 func (is *indexSearch) searchTagValueSuffixesAll(tvss map[string]struct{}, tagKey, tagValuePrefix string, delimiter byte, maxTagValueSuffixes int) error {
 	kb := &is.kb
-	nsPrefix := byte(nsPrefixTagToMetricIDs)
+	nsPrefix := byte(NsPrefixTagToMetricIDs)
 	kb.B = is.marshalCommonPrefix(kb.B[:0], nsPrefix)
 	kb.B = marshalTagValue(kb.B, bytesutil.ToUnsafeBytes(tagKey))
 	kb.B = marshalTagValue(kb.B, bytesutil.ToUnsafeBytes(tagValuePrefix))
@@ -1205,7 +1205,7 @@ func (is *indexSearch) searchTagValueSuffixesAll(tvss map[string]struct{}, tagKe
 }
 
 func (is *indexSearch) searchTagValueSuffixesForDate(tvss map[string]struct{}, date uint64, tagKey, tagValuePrefix string, delimiter byte, maxTagValueSuffixes int) error {
-	nsPrefix := byte(nsPrefixDateTagToMetricIDs)
+	nsPrefix := byte(NsPrefixDateTagToMetricIDs)
 	kb := &is.kb
 	kb.B = is.marshalCommonPrefix(kb.B[:0], nsPrefix)
 	kb.B = encoding.MarshalUint64(kb.B, date)
@@ -1278,7 +1278,7 @@ func (db *indexDB) GetSeriesCount(accountID, projectID uint32, deadline uint64) 
 	if err != nil {
 		return 0, err
 	}
-
+	logger.Infof("use ext db, curr=%d", n)
 	var nExt uint64
 	db.doExtDB(func(extDB *indexDB) {
 		is := extDB.getIndexSearch(accountID, projectID, deadline)
@@ -1298,10 +1298,12 @@ func (is *indexSearch) getSeriesCount() (uint64, error) {
 	loopsPaceLimiter := 0
 	var metricIDsLen uint64
 	// Extract the number of series from ((__name__=value): metricIDs) rows
-	kb.B = is.marshalCommonPrefix(kb.B[:0], nsPrefixTagToMetricIDs)
-	kb.B = marshalTagValue(kb.B, nil)
+	kb.B = is.marshalCommonPrefix(kb.B[:0], NsPrefixTagToMetricIDs) // 9 字节前缀
+	kb.B = marshalTagValue(kb.B, nil)                               // 10 字节了，追加了 \1   // 这里实际搜索这种索引  metricGroupName -> metric id
 	ts.Seek(kb.B)
+	it := 0
 	for ts.NextItem() {
+		it++
 		if loopsPaceLimiter&paceLimiterFastIterationsMask == 0 {
 			if err := checkSearchDeadlineAndPace(is.deadline); err != nil {
 				return 0, err
@@ -1312,12 +1314,12 @@ func (is *indexSearch) getSeriesCount() (uint64, error) {
 		if !bytes.HasPrefix(item, kb.B) {
 			break
 		}
-		tail := item[len(kb.B):]
+		tail := item[len(kb.B):] // 9 字节以后的内容
 		n := bytes.IndexByte(tail, tagSeparatorChar)
 		if n < 0 {
 			return 0, fmt.Errorf("invalid tag->metricIDs line %q: cannot find tagSeparatorChar %d", item, tagSeparatorChar)
 		}
-		tail = tail[n+1:]
+		tail = tail[n+1:] // tail 就是 metric id 的列表
 		if err := mp.InitOnlyTail(item, tail); err != nil {
 			return 0, err
 		}
@@ -1329,6 +1331,7 @@ func (is *indexSearch) getSeriesCount() (uint64, error) {
 	if err := ts.Error(); err != nil {
 		return 0, fmt.Errorf("error when counting unique timeseries: %w", err)
 	}
+	logger.Infof("iterate count:%d", it)
 	return metricIDsLen, nil
 }
 
@@ -1384,9 +1387,9 @@ func (is *indexSearch) getTSDBStatus(qt *querytracer.Tracer, tfss []*TagFilters,
 	focusLabelEqualBytes := []byte(focusLabel + "=")
 
 	loopsPaceLimiter := 0
-	nsPrefixExpected := byte(nsPrefixDateTagToMetricIDs)
+	nsPrefixExpected := byte(NsPrefixDateTagToMetricIDs)
 	if date == 0 {
-		nsPrefixExpected = nsPrefixTagToMetricIDs
+		nsPrefixExpected = NsPrefixTagToMetricIDs
 	}
 	kb.B = is.marshalCommonPrefixForDate(kb.B[:0], date)
 	prefix := kb.B
@@ -1692,7 +1695,7 @@ func (db *indexDB) deleteMetricIDs(metricIDs []uint64) {
 	// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/1347
 	items := getIndexItems()
 	for _, metricID := range metricIDs {
-		items.B = append(items.B, nsPrefixDeletedMetricID)
+		items.B = append(items.B, NsPrefixDeletedMetricID)
 		items.B = encoding.MarshalUint64(items.B, metricID)
 		items.Next()
 	}
@@ -1714,7 +1717,7 @@ func (is *indexSearch) loadDeletedMetricIDs() (*uint64set.Set, error) {
 	dmis := &uint64set.Set{}
 	ts := &is.ts
 	kb := &is.kb
-	kb.B = append(kb.B[:0], nsPrefixDeletedMetricID)
+	kb.B = append(kb.B[:0], NsPrefixDeletedMetricID)
 	ts.Seek(kb.B)
 	for ts.NextItem() {
 		item := ts.Item
@@ -1929,7 +1932,7 @@ func (is *indexSearch) getTSIDByMetricNameNoExtDB(dst *TSID, metricName []byte, 
 	ts := &is.ts
 	kb := &is.kb
 	// Do not use marshalCommonPrefix() here, since mn already contains (AccountID, ProjectID)
-	kb.B = append(kb.B[:0], nsPrefixDateMetricNameToTSID)
+	kb.B = append(kb.B[:0], NsPrefixDateMetricNameToTSID)
 	kb.B = encoding.MarshalUint64(kb.B, date)
 	kb.B = append(kb.B, metricName...)
 	kb.B = append(kb.B, kvSeparatorChar)
@@ -1983,7 +1986,7 @@ func (is *indexSearch) searchMetricNameWithCache(dst []byte, metricID uint64) ([
 func (is *indexSearch) searchMetricName(dst []byte, metricID uint64) ([]byte, bool) {
 	ts := &is.ts
 	kb := &is.kb
-	kb.B = is.marshalCommonPrefix(kb.B[:0], nsPrefixMetricIDToMetricName)
+	kb.B = is.marshalCommonPrefix(kb.B[:0], NsPrefixMetricIDToMetricName)
 	kb.B = encoding.MarshalUint64(kb.B, metricID)
 	if err := ts.FirstItemWithPrefix(kb.B); err != nil {
 		if err == io.EOF {
@@ -2007,7 +2010,7 @@ func (is *indexSearch) containsTimeRange(tr TimeRange) (bool, error) {
 	// The main practical case allows skipping searching in prev indexdb (`ts`) when `tr`
 	// is located above the max date stored there.
 	minDate := uint64(tr.MinTimestamp) / msecPerDay
-	kb.B = is.marshalCommonPrefix(kb.B[:0], nsPrefixDateToMetricID)
+	kb.B = is.marshalCommonPrefix(kb.B[:0], NsPrefixDateToMetricID)
 	prefix := kb.B
 	kb.B = encoding.MarshalUint64(kb.B, minDate)
 	ts.Seek(kb.B)
@@ -2029,7 +2032,7 @@ func (is *indexSearch) getTSIDByMetricID(dst *TSID, metricID uint64) bool {
 	// must be checked by the caller.
 	ts := &is.ts
 	kb := &is.kb
-	kb.B = is.marshalCommonPrefix(kb.B[:0], nsPrefixMetricIDToTSID)
+	kb.B = is.marshalCommonPrefix(kb.B[:0], NsPrefixMetricIDToTSID)
 	kb.B = encoding.MarshalUint64(kb.B, metricID)
 	if err := ts.FirstItemWithPrefix(kb.B); err != nil {
 		if err == io.EOF {
@@ -2059,7 +2062,7 @@ func (is *indexSearch) updateMetricIDsByMetricNameMatch(qt *querytracer.Tracer, 
 	qt.Printf("sort %d metric ids", len(sortedMetricIDs))
 
 	kb := &is.kb
-	kb.B = is.marshalCommonPrefix(kb.B[:0], nsPrefixTagToMetricIDs)
+	kb.B = is.marshalCommonPrefix(kb.B[:0], NsPrefixTagToMetricIDs)
 	tfs = removeCompositeTagFilters(tfs, kb.B)
 
 	metricName := kbPool.Get()
@@ -2169,7 +2172,7 @@ func hasCompositeTagFilters(tfs []*tagFilter, prefix []byte) bool {
 }
 
 func matchTagFilters(mn *MetricName, tfs []*tagFilter, kb *bytesutil.ByteBuffer) (bool, error) {
-	kb.B = marshalCommonPrefix(kb.B[:0], nsPrefixTagToMetricIDs, mn.AccountID, mn.ProjectID)
+	kb.B = marshalCommonPrefix(kb.B[:0], NsPrefixTagToMetricIDs, mn.AccountID, mn.ProjectID)
 	for i, tf := range tfs {
 		if bytes.Equal(tf.key, graphiteReverseTagKey) {
 			// Skip artificial tag filter for Graphite-like metric names with dots,
@@ -2809,19 +2812,19 @@ const (
 	int64Max = int64((1 << 63) - 1)
 )
 
-func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricName) {
+func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricName) { // 添加每天的日期索引
 	ii := getIndexItems()
 	defer putIndexItems(ii)
 
-	ii.B = marshalCommonPrefix(ii.B, nsPrefixDateToMetricID, mn.AccountID, mn.ProjectID)
-	ii.B = encoding.MarshalUint64(ii.B, date)
+	ii.B = marshalCommonPrefix(ii.B, NsPrefixDateToMetricID, mn.AccountID, mn.ProjectID)  // 索引 5
+	ii.B = encoding.MarshalUint64(ii.B, date) // 8 字节代表的日期
 	ii.B = encoding.MarshalUint64(ii.B, tsid.MetricID)
 	ii.Next()
 
 	// Create per-day inverted index entries for TSID.
 	//
 	// Do not use marshalCommonPrefix() here, since mn already contains (AccountID, ProjectID)
-	ii.B = append(ii.B, nsPrefixDateMetricNameToTSID)
+	ii.B = append(ii.B, NsPrefixDateMetricNameToTSID)  // 索引 7
 	ii.B = encoding.MarshalUint64(ii.B, date)
 	ii.B = mn.Marshal(ii.B)
 	ii.B = append(ii.B, kvSeparatorChar)
@@ -2830,26 +2833,26 @@ func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricNa
 
 	// Create per-day inverted index entries for metricID.
 	kb := kbPool.Get()
-	defer kbPool.Put(kb)
-	kb.B = marshalCommonPrefix(kb.B[:0], nsPrefixDateTagToMetricIDs, mn.AccountID, mn.ProjectID)
+	defer kbPool.Put(kb) // 0xfe
+	kb.B = marshalCommonPrefix(kb.B[:0], NsPrefixDateTagToMetricIDs, mn.AccountID, mn.ProjectID)  // 索引 6
 	kb.B = encoding.MarshalUint64(kb.B, date)
 	ii.registerTagIndexes(kb.B, mn, tsid.MetricID)
 	is.db.tb.AddItems(ii.Items)
 }
 
-func (ii *indexItems) registerTagIndexes(prefix []byte, mn *MetricName, metricID uint64) {
+func (ii *indexItems) registerTagIndexes(prefix []byte, mn *MetricName, metricID uint64) { // 在 tag -> metric id 中调用了这个  // 三种索引
 	// Add index entry for MetricGroup -> MetricID
 	ii.B = append(ii.B, prefix...)
-	ii.B = marshalTagValue(ii.B, nil)
-	ii.B = marshalTagValue(ii.B, mn.MetricGroup)
-	ii.B = encoding.MarshalUint64(ii.B, metricID)
+	ii.B = marshalTagValue(ii.B, nil)             // 追加字符 tagSeparatorChar （1）
+	ii.B = marshalTagValue(ii.B, mn.MetricGroup)  // 追加 MetricGroup 和 1
+	ii.B = encoding.MarshalUint64(ii.B, metricID) // 追加 8 字节
 	ii.Next()
-	ii.addReverseMetricGroupIfNeeded(prefix, mn, metricID)
+	ii.addReverseMetricGroupIfNeeded(prefix, mn, metricID) // 如果 metric_name 中含有 .  则建立反向索引
 
 	// Add index entries for tags: tag -> MetricID
 	for _, tag := range mn.Tags {
 		ii.B = append(ii.B, prefix...)
-		ii.B = tag.Marshal(ii.B)
+		ii.B = tag.Marshal(ii.B) // 使用 \1 这个字符来分割 key/value
 		ii.B = encoding.MarshalUint64(ii.B, metricID)
 		ii.Next()
 	}
@@ -2857,7 +2860,7 @@ func (ii *indexItems) registerTagIndexes(prefix []byte, mn *MetricName, metricID
 	// Add index entries for composite tags: MetricGroup+tag -> MetricID
 	compositeKey := kbPool.Get()
 	for _, tag := range mn.Tags {
-		compositeKey.B = marshalCompositeTagKey(compositeKey.B[:0], mn.MetricGroup, tag.Key)
+		compositeKey.B = marshalCompositeTagKey(compositeKey.B[:0], mn.MetricGroup, tag.Key) // MetricGroup+tag
 		ii.B = append(ii.B, prefix...)
 		ii.B = marshalTagValue(ii.B, compositeKey.B)
 		ii.B = marshalTagValue(ii.B, tag.Value)
@@ -2908,7 +2911,7 @@ var graphiteReverseTagKey = []byte("\xff")
 // It is expected that the given prefix isn't used by users.
 const compositeTagKeyPrefix = '\xfe'
 
-func marshalCompositeTagKey(dst, name, key []byte) []byte {
+func marshalCompositeTagKey(dst, name, key []byte) []byte { // 01 索引
 	dst = append(dst, compositeTagKeyPrefix)
 	dst = encoding.MarshalVarUint64(dst, uint64(len(name)))
 	dst = append(dst, name...)
@@ -2947,7 +2950,7 @@ func reverseBytes(dst, src []byte) []byte {
 func (is *indexSearch) hasDateMetricIDNoExtDB(date, metricID uint64, accountID, projectID uint32) bool {
 	ts := &is.ts
 	kb := &is.kb
-	kb.B = marshalCommonPrefix(kb.B[:0], nsPrefixDateToMetricID, accountID, projectID)
+	kb.B = marshalCommonPrefix(kb.B[:0], NsPrefixDateToMetricID, accountID, projectID)
 	kb.B = encoding.MarshalUint64(kb.B, date)
 	kb.B = encoding.MarshalUint64(kb.B, metricID)
 	err := ts.FirstItemWithPrefix(kb.B)
@@ -3109,7 +3112,7 @@ func generateUniqueMetricID() uint64 {
 // between VictoriaMetrics restarts.
 var nextUniqueMetricID = uint64(time.Now().UnixNano())
 
-func marshalCommonPrefix(dst []byte, nsPrefix byte, accountID, projectID uint32) []byte {
+func marshalCommonPrefix(dst []byte, nsPrefix byte, accountID, projectID uint32) []byte { // 9 字节的前缀
 	dst = append(dst, nsPrefix)
 	dst = encoding.MarshalUint32(dst, accountID)
 	dst = encoding.MarshalUint32(dst, projectID)
@@ -3123,10 +3126,10 @@ func (is *indexSearch) marshalCommonPrefix(dst []byte, nsPrefix byte) []byte {
 func (is *indexSearch) marshalCommonPrefixForDate(dst []byte, date uint64) []byte {
 	if date == 0 {
 		// Global index
-		return is.marshalCommonPrefix(dst, nsPrefixTagToMetricIDs)
+		return is.marshalCommonPrefix(dst, NsPrefixTagToMetricIDs)
 	}
 	// Per-day index
-	dst = is.marshalCommonPrefix(dst, nsPrefixDateTagToMetricIDs)
+	dst = is.marshalCommonPrefix(dst, NsPrefixDateTagToMetricIDs)
 	return encoding.MarshalUint64(dst, date)
 }
 
@@ -3192,7 +3195,7 @@ func (mp *tagToMetricIDsRowParser) Init(b []byte, nsPrefixExpected byte) error {
 	if nsPrefix != nsPrefixExpected {
 		return fmt.Errorf("invalid prefix for tag->metricIDs row %q; got %d; want %d", b, nsPrefix, nsPrefixExpected)
 	}
-	if nsPrefix == nsPrefixDateTagToMetricIDs {
+	if nsPrefix == NsPrefixDateTagToMetricIDs {
 		// unmarshal date.
 		if len(tail) < 8 {
 			return fmt.Errorf("cannot unmarshal date from (date, tag)->metricIDs row %q from %d bytes; want at least 8 bytes", b, len(tail))
@@ -3213,7 +3216,7 @@ func (mp *tagToMetricIDsRowParser) Init(b []byte, nsPrefixExpected byte) error {
 // MarshalPrefix marshals row prefix without tail to dst.
 func (mp *tagToMetricIDsRowParser) MarshalPrefix(dst []byte) []byte {
 	dst = marshalCommonPrefix(dst, mp.NSPrefix, mp.AccountID, mp.ProjectID)
-	if mp.NSPrefix == nsPrefixDateTagToMetricIDs {
+	if mp.NSPrefix == NsPrefixDateTagToMetricIDs {
 		dst = encoding.MarshalUint64(dst, mp.Date)
 	}
 	dst = mp.Tag.Marshal(dst)
@@ -3224,7 +3227,7 @@ func (mp *tagToMetricIDsRowParser) MarshalPrefix(dst []byte) []byte {
 //
 // b must contain tag->metricIDs row.
 // b cannot be re-used until Reset call.
-func (mp *tagToMetricIDsRowParser) InitOnlyTail(b, tail []byte) error {
+func (mp *tagToMetricIDsRowParser) InitOnlyTail(b, tail []byte) error { // 8 字节的倍数的 metric id 列表
 	if len(tail) == 0 {
 		return fmt.Errorf("missing metricID in the tag->metricIDs row %q", b)
 	}
@@ -3247,7 +3250,7 @@ func (mp *tagToMetricIDsRowParser) EqualPrefix(x *tagToMetricIDsRowParser) bool 
 }
 
 // MetricIDsLen returns the number of MetricIDs in the mp.tail
-func (mp *tagToMetricIDsRowParser) MetricIDsLen() int {
+func (mp *tagToMetricIDsRowParser) MetricIDsLen() int { // 数一数有多少个 metric id
 	return len(mp.tail) / 8
 }
 
@@ -3299,13 +3302,13 @@ func (mp *tagToMetricIDsRowParser) GetMatchingSeriesCount(filter, negativeFilter
 	return n
 }
 
-func mergeTagToMetricIDsRows(data []byte, items []mergeset.Item) ([]byte, []mergeset.Item) {
-	data, items = mergeTagToMetricIDsRowsInternal(data, items, nsPrefixTagToMetricIDs)
-	data, items = mergeTagToMetricIDsRowsInternal(data, items, nsPrefixDateTagToMetricIDs)
+func mergeTagToMetricIDsRows(data []byte, items []mergeset.Item) ([]byte, []mergeset.Item) { // merge 时候的 callback 函数  //??? 为什么要特殊处理两种索引
+	data, items = mergeTagToMetricIDsRowsInternal(data, items, NsPrefixTagToMetricIDs)     // 索引 1  , tag -> metric ids
+	data, items = mergeTagToMetricIDsRowsInternal(data, items, NsPrefixDateTagToMetricIDs) // 索引 6, date + tag -> metric ids
 	return data, items
 }
 
-func mergeTagToMetricIDsRowsInternal(data []byte, items []mergeset.Item, nsPrefix byte) ([]byte, []mergeset.Item) {
+func mergeTagToMetricIDsRowsInternal(data []byte, items []mergeset.Item, nsPrefix byte) ([]byte, []mergeset.Item) { // 索引 1 和索引 6 的特殊处理函数
 	// Perform quick checks whether items contain rows starting from nsPrefix
 	// based on the fact that items are sorted.
 	if len(items) <= 2 {

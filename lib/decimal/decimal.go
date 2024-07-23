@@ -1,11 +1,31 @@
 package decimal
 
 import (
+	"fmt"
 	"math"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"unsafe"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fastnum"
 )
+
+const tableLen = 32767
+
+var table = func() []int64 {
+	out := make([]int64, 0, tableLen+1)
+	out = append(out, 1)
+	var cur int64 = 10
+	for i := 1; i <= tableLen; i++ {
+		out = append(out, cur)
+		if cur*10 > 0 {
+			cur *= 10
+		}
+	}
+	return out
+}()
 
 // CalibrateScale calibrates a and b with the corresponding exponents ae, be
 // and returns the resulting exponent e.
@@ -35,33 +55,512 @@ func CalibrateScale(a []int64, ae int16, b []int64, be int16) (e int16) {
 		}
 	}
 	upExp -= downExp
-	for i, v := range a {
-		if isSpecialValue(v) {
-			// Do not take into account special values.
-			continue
+	if upExp > 0 {
+		times := table[upExp]
+		for i, v := range a {
+			if isSpecialValue(v) {
+				// Do not take into account special values.
+				continue
+			}
+			a[i] = v * times
 		}
-		adjExp := upExp
-		for adjExp > 0 {
-			v *= 10
-			adjExp--
-		}
-		a[i] = v
 	}
 	if downExp > 0 {
+		times := table[downExp]
 		for i, v := range b {
 			if isSpecialValue(v) {
 				// Do not take into account special values.
 				continue
 			}
-			adjExp := downExp
-			for adjExp > 0 {
-				v /= 10
-				adjExp--
-			}
-			b[i] = v
+			b[i] = v / times
 		}
 	}
 	return be + downExp
+}
+
+// CalibrateScale calibrates a and b with the corresponding exponents ae, be
+// and returns the resulting exponent e.
+func CalibrateScale_v1(a []int64, ae int16, b []int64, be int16) (e int16) {
+	if ae == be {
+		// Fast path - exponents are equal.
+		return ae
+	}
+	if len(a) == 0 {
+		return be
+	}
+	if len(b) == 0 {
+		return ae
+	}
+
+	if ae < be {
+		a, b = b, a
+		ae, be = be, ae
+	}
+
+	upExp := ae - be
+	downExp := int16(0)
+	for _, v := range a {
+		maxUpExp := maxUpExponent(v)
+		if upExp-maxUpExp > downExp {
+			downExp = upExp - maxUpExp
+		}
+	}
+	upExp -= downExp
+	//var isNotSpecial bool
+	//isNotSpecialValue := (*uint8)(unsafe.Pointer(&isNotSpecial))
+	if upExp > 0 {
+		//times := table[upExp-1]
+		for i, v := range a {
+			//isNotSpecial = !(v > vMax || v < vMin)
+			// if isSpecialValue(v) {
+			// 	// Do not take into account special values.
+			// 	continue
+			// }
+			//a[i] = v * table[upExp*int16(*isNotSpecialValue)]
+			a[i] = v * table[upExp*IsNotSpecial(v)]
+		}
+	}
+	if downExp > 0 {
+		//times := table[downExp-1]
+		for i, v := range b {
+			// if isSpecialValue(v) {
+			// 	// Do not take into account special values.
+			// 	continue
+			// }
+			//isNotSpecial = !(v > vMax || v < vMin)
+			//b[i] = v / table[downExp*int16(*isNotSpecialValue)]
+			//b[i] = v / table[downExp]
+			b[i] = v / table[downExp*IsNotSpecial(v)]
+		}
+	}
+	return be + downExp
+}
+
+// CalibrateScale calibrates a and b with the corresponding exponents ae, be
+// and returns the resulting exponent e.
+func CalibrateScale_v2(a []int64, ae int16, b []int64, be int16) (e int16) {
+	if ae == be {
+		// Fast path - exponents are equal.
+		return ae
+	}
+	if len(a) == 0 {
+		return be
+	}
+	if len(b) == 0 {
+		return ae
+	}
+
+	if ae < be {
+		a, b = b, a
+		ae, be = be, ae
+	}
+
+	upExp := ae - be
+	downExp := int16(0)
+	for _, v := range a {
+		maxUpExp := maxUpExponent(v)
+		if upExp-maxUpExp > downExp {
+			downExp = upExp - maxUpExp
+		}
+	}
+	upExp -= downExp
+	//var isNotSpecial bool
+	//isNotSpecialValue := (*uint8)(unsafe.Pointer(&isNotSpecial))
+	if upExp > 0 {
+		//times := table[upExp-1]
+		for i, v := range a {
+			//isNotSpecial = !(v > vMax || v < vMin)
+			// if isSpecialValue(v) {
+			// 	// Do not take into account special values.
+			// 	continue
+			// }
+			//a[i] = v * table[upExp*int16(*isNotSpecialValue)]
+			a[i] = v * table[upExp*IsNotSpecialV2(v)]
+		}
+	}
+	if downExp > 0 {
+		//times := table[downExp-1]
+		for i, v := range b {
+			// if isSpecialValue(v) {
+			// 	// Do not take into account special values.
+			// 	continue
+			// }
+			//isNotSpecial = !(v > vMax || v < vMin)
+			//b[i] = v / table[downExp*int16(*isNotSpecialValue)]
+			//b[i] = v / table[downExp]
+			b[i] = v / table[downExp*IsNotSpecialV2(v)]
+		}
+	}
+	return be + downExp
+}
+
+func IsNotSpecial(v int64) int16 {
+	if v > vMax || v < vMin {
+		return 0
+	}
+	return 1
+}
+
+func IsNotSpecialV2(v int64) int16 {
+	ret := !(v > vMax || v < vMin)
+	return int16(*(*uint8)(unsafe.Pointer(&ret)))
+}
+
+func CalibrateScale_v3(a []int64, ae int16, b []int64, be int16) (e int16) {
+	if ae == be {
+		// Fast path - exponents are equal.
+		return ae
+	}
+	if len(a) == 0 {
+		return be
+	}
+	if len(b) == 0 {
+		return ae
+	}
+
+	if ae < be {
+		a, b = b, a
+		ae, be = be, ae
+	}
+
+	upExp := ae - be
+	downExp := int16(0)
+	for _, v := range a {
+		maxUpExp := maxUpExponent(v)
+		if upExp-maxUpExp > downExp {
+			downExp = upExp - maxUpExp
+		}
+	}
+	upExp -= downExp
+	var tempVar uint64
+	boolP := (*bool)(unsafe.Pointer(&tempVar))
+	int16P := (*int16)(unsafe.Pointer(&tempVar))
+	if upExp > 0 {
+		for i, v := range a {
+
+			*boolP = !(v > vMax || v < vMin)
+			a[i] = v * table[upExp*(*int16P)]
+		}
+	}
+	if downExp > 0 {
+		for i, v := range b {
+			*boolP = !(v > vMax || v < vMin)
+			b[i] = v / table[downExp*(*int16P)]
+		}
+	}
+	return be + downExp
+}
+
+func CalibrateScale_v4(a []int64, ae int16, b []int64, be int16) (e int16) {
+	if ae == be {
+		// Fast path - exponents are equal.
+		return ae
+	}
+	if len(a) == 0 {
+		return be
+	}
+	if len(b) == 0 {
+		return ae
+	}
+
+	if ae < be {
+		a, b = b, a
+		ae, be = be, ae
+	}
+
+	upExp := ae - be
+	downExp := int16(0)
+	for _, v := range a {
+		maxUpExp := maxUpExponent(v)
+		if upExp-maxUpExp > downExp {
+			downExp = upExp - maxUpExp
+		}
+	}
+	upExp -= downExp
+	var tempBool bool
+	int16P := (*int16)(unsafe.Pointer(&tempBool))
+	if upExp > 0 {
+		for i, v := range a {
+			tempBool = !(v > vMax || v < vMin)
+			a[i] = v * table[upExp*(*int16P)]
+		}
+	}
+	if downExp > 0 {
+		for i, v := range b {
+			tempBool = !(v > vMax || v < vMin)
+			b[i] = v / table[downExp*(*int16P)]
+		}
+	}
+	return be + downExp
+}
+
+func CalibrateScale_v5(a []int64, ae int16, b []int64, be int16) (e int16) {
+	if ae == be {
+		// Fast path - exponents are equal.
+		return ae
+	}
+	if len(a) == 0 {
+		return be
+	}
+	if len(b) == 0 {
+		return ae
+	}
+
+	if ae < be {
+		a, b = b, a
+		ae, be = be, ae
+	}
+
+	upExp := ae - be
+	downExp := int16(0)
+	for _, v := range a {
+		maxUpExp := maxUpExponent(v)
+		if upExp-maxUpExp > downExp {
+			downExp = upExp - maxUpExp
+		}
+	}
+	upExp -= downExp
+	var tempInt64 [8]int64
+	var tempBoolP = [8]*bool{
+		(*bool)(unsafe.Pointer(&tempInt64[0])),
+		(*bool)(unsafe.Pointer(&tempInt64[1])),
+		(*bool)(unsafe.Pointer(&tempInt64[2])),
+		(*bool)(unsafe.Pointer(&tempInt64[3])),
+		(*bool)(unsafe.Pointer(&tempInt64[4])),
+		(*bool)(unsafe.Pointer(&tempInt64[5])),
+		(*bool)(unsafe.Pointer(&tempInt64[6])),
+		(*bool)(unsafe.Pointer(&tempInt64[7])),
+	}
+	//var tempBool bool
+	//int16P := (*int16)(unsafe.Pointer(&tempBool))
+	if upExp > 0 {
+		times := table[upExp]
+		tailLoc := len(a) - len(a)&7 // len(a)%8
+		topHalf := a[:tailLoc]
+		for i := 0; i < tailLoc; i += 8 {
+			*(tempBoolP[0]) = !(topHalf[i+0] > vMax || topHalf[i+0] < vMin)
+			*(tempBoolP[1]) = !(topHalf[i+1] > vMax || topHalf[i+1] < vMin)
+			*(tempBoolP[2]) = !(topHalf[i+2] > vMax || topHalf[i+2] < vMin)
+			*(tempBoolP[3]) = !(topHalf[i+3] > vMax || topHalf[i+3] < vMin)
+			*(tempBoolP[4]) = !(topHalf[i+4] > vMax || topHalf[i+4] < vMin)
+			*(tempBoolP[5]) = !(topHalf[i+5] > vMax || topHalf[i+5] < vMin)
+			*(tempBoolP[6]) = !(topHalf[i+6] > vMax || topHalf[i+6] < vMin)
+			*(tempBoolP[7]) = !(topHalf[i+7] > vMax || topHalf[i+7] < vMin)
+			topHalf[i+0] *= table[upExp*int16(tempInt64[0])]
+			topHalf[i+1] *= table[upExp*int16(tempInt64[1])]
+			topHalf[i+2] *= table[upExp*int16(tempInt64[2])]
+			topHalf[i+3] *= table[upExp*int16(tempInt64[3])]
+			topHalf[i+4] *= table[upExp*int16(tempInt64[4])]
+			topHalf[i+5] *= table[upExp*int16(tempInt64[5])]
+			topHalf[i+6] *= table[upExp*int16(tempInt64[6])]
+			topHalf[i+7] *= table[upExp*int16(tempInt64[7])]
+		}
+		bottomHalf := a[tailLoc:]
+		for i, v := range bottomHalf {
+			if isSpecialValue(v) {
+				continue
+			}
+			bottomHalf[i] = v * times
+		}
+	}
+	if downExp > 0 {
+		times := table[downExp]
+		tailLoc := len(b) - len(b)&7 // len(a)%8
+		topHalf := b[:tailLoc]
+		for i := 0; i < tailLoc; i += 8 {
+			*(tempBoolP[0]) = !(topHalf[i+0] > vMax || topHalf[i+0] < vMin)
+			*(tempBoolP[1]) = !(topHalf[i+1] > vMax || topHalf[i+1] < vMin)
+			*(tempBoolP[2]) = !(topHalf[i+2] > vMax || topHalf[i+2] < vMin)
+			*(tempBoolP[3]) = !(topHalf[i+3] > vMax || topHalf[i+3] < vMin)
+			*(tempBoolP[4]) = !(topHalf[i+4] > vMax || topHalf[i+4] < vMin)
+			*(tempBoolP[5]) = !(topHalf[i+5] > vMax || topHalf[i+5] < vMin)
+			*(tempBoolP[6]) = !(topHalf[i+6] > vMax || topHalf[i+6] < vMin)
+			*(tempBoolP[7]) = !(topHalf[i+7] > vMax || topHalf[i+7] < vMin)
+			topHalf[i+0] /= table[downExp*int16(tempInt64[0])]
+			topHalf[i+1] /= table[downExp*int16(tempInt64[1])]
+			topHalf[i+2] /= table[downExp*int16(tempInt64[2])]
+			topHalf[i+3] /= table[downExp*int16(tempInt64[3])]
+			topHalf[i+4] /= table[downExp*int16(tempInt64[4])]
+			topHalf[i+5] /= table[downExp*int16(tempInt64[5])]
+			topHalf[i+6] /= table[downExp*int16(tempInt64[6])]
+			topHalf[i+7] /= table[downExp*int16(tempInt64[7])]
+		}
+		bottomHalf := b[tailLoc:]
+		for i, v := range bottomHalf {
+			if isSpecialValue(v) {
+				continue
+			}
+			bottomHalf[i] = v / times
+		}
+	}
+	return be + downExp
+}
+
+func CalibrateScale_v6(a []int64, ae int16, b []int64, be int16) (e int16) { // 无法通过测试用例
+	if ae == be {
+		// Fast path - exponents are equal.
+		return ae
+	}
+	if len(a) == 0 {
+		return be
+	}
+	if len(b) == 0 {
+		return ae
+	}
+
+	if ae < be {
+		a, b = b, a
+		ae, be = be, ae
+	}
+
+	upExp := ae - be
+	downExp := int16(0)
+	for _, v := range a {
+		maxUpExp := maxUpExponent(v)
+		if upExp-maxUpExp > downExp {
+			downExp = upExp - maxUpExp
+		}
+	}
+	upExp -= downExp
+	if upExp > 0 {
+		times := table[upExp]
+		for i, v := range a {
+
+			a[i] = v * times
+		}
+	}
+	if downExp > 0 {
+		times := table[downExp]
+		for i, v := range b {
+			b[i] = v / times
+		}
+	}
+	return be + downExp
+}
+
+// const n = 32767
+
+// var table = func() []int64 {
+// 	out := make([]int64, 0, n)
+// 	var cur int64 = 10
+// 	for i := 1; i <= n; i++ {
+// 		out = append(out, cur)
+// 		if cur*10 > 0 {
+// 			cur *= 10
+// 		}
+// 	}
+// 	return out
+// }()
+
+// // CalibrateScale calibrates a and b with the corresponding exponents ae, be
+// // and returns the resulting exponent e.
+// func CalibrateScale1(a []int64, ae int16, b []int64, be int16) (e int16) { // 这个函数是绝对的瓶颈  // exponent 指数
+// 	// backupA := append([]int64{}, a...)
+// 	// backupB := append([]int64{}, b...)
+// 	// backupAE := ae
+// 	// backupBE := be
+// 	if ae == be {
+// 		// Fast path - exponents are equal.
+// 		return ae
+// 	}
+// 	if len(a) == 0 {
+// 		return be
+// 	}
+// 	if len(b) == 0 {
+// 		return ae
+// 	}
+
+// 	if ae < be {
+// 		a, b = b, a
+// 		ae, be = be, ae
+// 	}
+
+// 	upExp := ae - be
+// 	downExp := int16(0) // 看起来是计算出一个最小的值
+// 	for _, v := range a {
+// 		maxUpExp := maxUpExponent(v) // 计算 v 等于 10 的几次方
+// 		if upExp-maxUpExp > downExp {
+// 			downExp = upExp - maxUpExp
+// 		}
+// 	}
+// 	upExp -= downExp
+// 	if upExp > 0 {
+// 		times := table[upExp-1]
+// 		for i, v := range a {
+// 			if isSpecialValue(v) {
+// 				// Do not take into account special values.
+// 				continue
+// 			}
+// 			a[i] = v * times
+// 		}
+// 		adjExp := upExp
+// 		if adjExp > n {
+// 			panic(fmt.Sprintf("too large: %d", adjExp))
+// 		}
+// 		if adjExp > 0 {
+// 			v *= table[adjExp-1]
+// 		}
+// 		// for adjExp > 0 { // 一直乘 10，直到达到预定的指数次数  // todo: 用查表法，一次就够了
+// 		// 	v *= 10
+// 		// 	adjExp--
+// 		// }
+// 		a[i] = v
+
+// 	}
+// 	if downExp > 0 {
+// 		times := table[downExp-1]
+// 		for i, v := range b {
+// 			if isSpecialValue(v) {
+// 				// Do not take into account special values.
+// 				continue
+// 			}
+// 			adjExp := downExp
+// 			// for adjExp > 0 { // todo: 使用查表法
+// 			// 	v /= 10
+// 			// 	adjExp--
+// 			// }
+// 			if adjExp > n {
+// 				panic(fmt.Sprintf("too large: %d", adjExp))
+// 			}
+// 			if adjExp > 0 {
+// 				v /= table[adjExp-1]
+// 			}
+// 			b[i] = v
+// 		}
+// 	}
+// 	ret := be + downExp
+// 	// writeToFile(backupA, backupAE, backupB, backupBE, ret)
+// 	// panic("p")
+// 	return ret
+// }
+
+func writeToFile(a []int64, ae int16, b []int64, be int16, ret int16) {
+	f, _ := os.Create("/Users/fuchunzhang/Documents/temp/2024/2024-01-24/code.txt")
+	sb := &strings.Builder{}
+	writeArray(a, sb, "a")
+	writeArray(b, sb, "b")
+	sb.WriteString(fmt.Sprintf("var ae int16 = %d\n", ae))
+	sb.WriteString(fmt.Sprintf("var be int16 = %d\n", be))
+	sb.WriteString(fmt.Sprintf("var ret int16 = %d\n", ret))
+	f.WriteString(sb.String())
+	f.Close()
+}
+
+func writeArray(a []int64, sb *strings.Builder, varName string) {
+	sb.WriteString("var ")
+	sb.WriteString(varName)
+	sb.WriteString(" []int64 = []int64{")
+	isFirst := true
+	for _, v := range a {
+		if isFirst {
+			isFirst = false
+		} else {
+			sb.WriteString(",\n")
+		}
+		sb.WriteString("\t0x")
+		sb.WriteString(strconv.FormatInt(v, 16))
+	}
+	sb.WriteString("}\n")
 }
 
 // ExtendFloat64sCapacity extends dst capacity to hold additionalItems
@@ -259,7 +758,7 @@ var vaeBufPool sync.Pool
 
 const int64Max = int64(1<<63 - 1)
 
-func maxUpExponent(v int64) int16 {
+func maxUpExponent(v int64) int16 { // 计算值等于十的几次方
 	if v == 0 || isSpecialValue(v) {
 		// Any exponent allowed for zeroes and special values.
 		return 1024

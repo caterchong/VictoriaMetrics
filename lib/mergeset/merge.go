@@ -50,7 +50,8 @@ var bsmPool = &sync.Pool{
 }
 
 type blockStreamMerger struct {
-	prepareBlock PrepareBlockCallback
+	prepareBlock PrepareBlockCallback //??? 回调函数是在什么时机触发的?
+	checker      IndexChecker         // 检查逐条记录的回调
 
 	bsrHeap bsrHeap
 
@@ -67,6 +68,7 @@ type blockStreamMerger struct {
 
 func (bsm *blockStreamMerger) reset() {
 	bsm.prepareBlock = nil
+	bsm.checker = nil
 
 	for i := range bsm.bsrHeap {
 		bsm.bsrHeap[i] = nil
@@ -100,11 +102,16 @@ func (bsm *blockStreamMerger) Init(bsrs []*blockStreamReader, prepareBlock Prepa
 
 var errForciblyStopped = fmt.Errorf("forcibly stopped")
 
+// var (
+// 	testS = uint64set.Set{}
+// )
+
 func (bsm *blockStreamMerger) Merge(bsw *blockStreamWriter, ph *partHeader, stopCh <-chan struct{}, itemsMerged *uint64) error {
 again:
 	if len(bsm.bsrHeap) == 0 {
 		// Write the last (maybe incomplete) inmemoryBlock to bsw.
 		bsm.flushIB(bsw, ph, itemsMerged)
+		//logger.Infof("metric count:%d", testS.Len())
 		return nil
 	}
 
@@ -130,11 +137,35 @@ again:
 		if hasNextItem && string(item) > nextItem {
 			break
 		}
+		if string(item) == nextItem {
+			goto NextRecord //remove duplicate record, important for merge
+		}
+		if bsm.checker != nil && bsm.checker(item) { // 此回调用于跳过某些记录  // ??? 没找到 bug 原因，仍然非常奇怪
+			//bsr.currItemIdx++
+			// if item[0] == 3 {
+			// 	logger.Infof("skip item:%X", string(item))
+			// }
+			//continue  // 这里 continue 后，会影响别的记录的插入。非常奇怪 !!!
+			//break
+			goto NextRecord
+		}
+		// if item[0] == 3 {
+		// 	logger.Infof("not skip index 3")
+		// }
+		// {
+		// 	if item[0] == 3 {
+		// 		metricID := encoding.UnmarshalUint64(item[9:])
+		// 		testS.Add(metricID)
+		// 	}
+		// }
 		if !bsm.ib.Add(item) {
 			// The bsm.ib is full. Flush it to bsw and continue.
+			//logger.Infof("ready to flush, bsr.currItemIdx=%d, cur=%X",
+			//	bsr.currItemIdx, string(item))
 			bsm.flushIB(bsw, ph, itemsMerged)
 			continue
 		}
+	NextRecord:
 		bsr.currItemIdx++
 	}
 	if bsr.currItemIdx == len(bsr.Block.items) {
@@ -165,24 +196,28 @@ func (bsm *blockStreamMerger) flushIB(bsw *blockStreamWriter, ph *partHeader, it
 	}
 	atomic.AddUint64(itemsMerged, uint64(len(items)))
 	if bsm.prepareBlock != nil {
-		bsm.firstItem = append(bsm.firstItem[:0], items[0].String(data)...)
-		bsm.lastItem = append(bsm.lastItem[:0], items[len(items)-1].String(data)...)
-		data, items = bsm.prepareBlock(data, items)
-		bsm.ib.data = data
-		bsm.ib.items = items
+		data, items = bsm.prepareBlock(data, items) // 如果设定了回调函数，则在 flush 一个 block 的时候调用回调函数
 		if len(items) == 0 {
 			// Nothing to flush
+			//logger.Infof("flushIB no data, next block, input len=%d", len(bsm.ib.items))
+			bsm.ib.Reset()
 			return
 		}
+		bsm.firstItem = append(bsm.firstItem[:0], items[0].String(data)...)
+		bsm.lastItem = append(bsm.lastItem[:0], items[len(items)-1].String(data)...)
+		//
+		bsm.ib.data = data
+		bsm.ib.items = items
+
 		// Consistency checks after prepareBlock call.
-		firstItem := items[0].String(data)
-		if firstItem != string(bsm.firstItem) {
-			logger.Panicf("BUG: prepareBlock must return first item equal to the original first item;\ngot\n%X\nwant\n%X", firstItem, bsm.firstItem)
-		}
-		lastItem := items[len(items)-1].String(data)
-		if lastItem != string(bsm.lastItem) {
-			logger.Panicf("BUG: prepareBlock must return last item equal to the original last item;\ngot\n%X\nwant\n%X", lastItem, bsm.lastItem)
-		}
+		// firstItem := items[0].String(data)
+		// if firstItem != string(bsm.firstItem) {
+		// 	logger.Panicf("BUG: prepareBlock must return first item equal to the original first item;\ngot\n%X\nwant\n%X", firstItem, bsm.firstItem)
+		// }
+		// lastItem := items[len(items)-1].String(data)
+		// if lastItem != string(bsm.lastItem) {
+		// 	logger.Panicf("BUG: prepareBlock must return last item equal to the original last item;\ngot\n%X\nwant\n%X", lastItem, bsm.lastItem)
+		// }
 		// Verify whether the bsm.ib.items are sorted only in tests, since this
 		// can be expensive check in prod for items with long common prefix.
 		if isInTest && !bsm.ib.isSorted() {

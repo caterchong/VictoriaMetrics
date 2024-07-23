@@ -266,9 +266,9 @@ func (s *Set) union(a *Set, mayOwn bool) {
 	if s.Len() == 0 {
 		// Fast path - copy `a` to `s`.
 		if !mayOwn {
-			a = a.Clone()
+			a = a.Clone()  // false 时克隆一份
 		}
-		*s = *a
+		*s = *a  // 直接赋值
 		return
 	}
 	// Make shallow copy of `a`, since it can be modified by a.sort().

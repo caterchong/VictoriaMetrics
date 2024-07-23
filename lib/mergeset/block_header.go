@@ -70,6 +70,20 @@ func (bh *blockHeader) Marshal(dst []byte) []byte {
 	return dst
 }
 
+func (bh *blockHeader) MarshalLen() uint64 {
+	var tempBuf [8]byte
+	commonPrefixLen := len(encoding.MarshalVarUint64(tempBuf[:0], uint64(len(bh.commonPrefix))))
+	firstItemLen := len(encoding.MarshalVarUint64(tempBuf[:0], uint64(len(bh.firstItem))))
+	return uint64(commonPrefixLen + len(bh.commonPrefix) +
+		firstItemLen + len(bh.firstItem) +
+		1 + //bh.marshalType
+		4 + //bh.itemsCount
+		8 + //bh.itemsBlockOffset
+		8 + //bh.lensBlockOffset
+		4 + //bh.itemsBlockSize
+		4) //bh.lensBlockSize
+}
+
 // UnmarshalNoCopy unmarshals bh from src without copying the data from src.
 //
 // The src must remain unchanged while bh is in use.

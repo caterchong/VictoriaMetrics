@@ -42,7 +42,7 @@ func (tag *Tag) Equal(t *Tag) bool {
 
 // Marshal appends marshaled tag to dst and returns the result.
 func (tag *Tag) Marshal(dst []byte) []byte {
-	dst = marshalTagValue(dst, tag.Key)
+	dst = marshalTagValue(dst, tag.Key)  // 使用字符  \1 来分割
 	dst = marshalTagValue(dst, tag.Value)
 	return dst
 }
@@ -77,9 +77,9 @@ func marshalTagValue(dst, src []byte) []byte {
 	n2 := bytes.IndexByte(src, tagSeparatorChar)
 	n3 := bytes.IndexByte(src, kvSeparatorChar)
 	if n1 < 0 && n2 < 0 && n3 < 0 {
-		// Fast path.
+		// Fast path.  // 当 src =nil 时，走到这里
 		dst = append(dst, src...)
-		dst = append(dst, tagSeparatorChar)
+		dst = append(dst, tagSeparatorChar)  // 字符 \1
 		return dst
 	}
 
@@ -414,11 +414,30 @@ func (mn *MetricName) String() string {
 	return fmt.Sprintf("AccountID=%d, ProjectID=%d, %s{%s}", mnCopy.AccountID, mnCopy.ProjectID, mnCopy.MetricGroup, tagsStr)
 }
 
+func (mn *MetricName) MarshalToMetricText(dst []byte) []byte {
+	dst = append(dst, mn.MetricGroup...)
+	dst = append(dst, '{')
+	isFirst := true
+	for _, tag := range mn.Tags {
+		if isFirst {
+			isFirst = false
+		} else {
+			dst = append(dst, ',')
+		}
+		dst = append(dst, tag.Key...)
+		dst = append(dst, '=', '"')
+		dst = append(dst, tag.Value...)
+		dst = append(dst, '"')
+	}
+	dst = append(dst, '}', '\n')
+	return dst
+}
+
 // Marshal appends marshaled mn to dst and returns the result.
 //
 // mn.sortTags must be called before calling this function
 // in order to sort and de-duplcate tags.
-func (mn *MetricName) Marshal(dst []byte) []byte {
+func (mn *MetricName) Marshal(dst []byte) []byte {  // 序列化 metric name
 	// Calculate the required size and pre-allocate space in dst
 	dstLen := len(dst)
 	requiredSize := 8 + len(mn.MetricGroup) + 1
