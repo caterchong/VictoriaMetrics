@@ -122,8 +122,9 @@ func (r *ReaderAt) ReadAtNocopy(p []byte, off int64) []byte {
 	if off < 0 {
 		logger.Panicf("BUG: off=%d cannot be negative", off)
 	}
-	if len(r.mmapData) == 0 {
-		n, err := r.f.ReadAt(p, off)
+	mr := r.getMmapReader()
+	if len(mr.mmapData) == 0 {
+		n, err := mr.f.ReadAt(p, off)
 		if err != nil {
 			logger.Panicf("FATAL: cannot read %d bytes at offset %d of file %q: %s", len(p), off, r.Path(), err)
 		}
@@ -131,14 +132,14 @@ func (r *ReaderAt) ReadAtNocopy(p []byte, off int64) []byte {
 			logger.Panicf("FATAL: unexpected number of bytes read from file %q; got %d; want %d", r.Path(), n, len(p))
 		}
 	} else {
-		if off > int64(len(r.mmapData)-len(p)) {
-			logger.Panicf("BUG: off=%d is out of allowed range [0...%d] for len(p)=%d", off, len(r.mmapData)-len(p), len(p))
+		if off > int64(len(mr.mmapData)-len(p)) {
+			logger.Panicf("BUG: off=%d is out of allowed range [0...%d] for len(p)=%d", off, len(mr.mmapData)-len(p), len(p))
 		}
-		p = r.mmapData[off : off+int64(len(p))]
+		p = mr.mmapData[off : off+int64(len(p))]
 	}
 	if r.useLocalStats {
-		atomic.AddUint64(&r.readCalls, 1)
-		atomic.AddUint64(&r.readBytes, uint64(len(p)))
+		r.readCalls.Add(1)
+		r.readBytes.Add(int64(len(p)))
 	} else {
 		readCalls.Inc()
 		readBytes.Add(len(p))
@@ -150,13 +151,14 @@ func (r *ReaderAt) ReadByOffset(off int64, length int64) []byte {
 	if off < 0 {
 		logger.Panicf("BUG: off=%d cannot be negative", off)
 	}
-	if len(r.mmapData) == 0 {
+	mr := r.getMmapReader()
+	if len(mr.mmapData) == 0 {
 		logger.Panicf("not use mmap")
 	}
-	if off > int64(len(r.mmapData)-int(length)) {
-		logger.Panicf("BUG: off=%d is out of allowed range [0...%d] for len(p)=%d", off, len(r.mmapData)-int(length), int(length))
+	if off > int64(len(mr.mmapData)-int(length)) {
+		logger.Panicf("BUG: off=%d is out of allowed range [0...%d] for len(p)=%d", off, len(mr.mmapData)-int(length), int(length))
 	}
-	return r.mmapData[off : off+length]
+	return mr.mmapData[off : off+length]
 }
 
 // MustClose closes r.
