@@ -115,6 +115,20 @@ func (bh *blockHeader) Marshal(dst []byte) []byte {
 	return dst
 }
 
+func (bh *blockHeader) MarshalLen() int {
+	return bh.TSID.MarshalLen() +
+		8 + //bh.MinTimestamp
+		8 + //bh.MaxTimestamp
+		8 + //bh.FirstValue
+		8 + //TimestampsBlockOffset
+		8 + //ValuesBlockOffset
+		4 + //TimestampsBlockSize
+		4 + // ValuesBlockSize
+		4 + // RowsCount
+		2 + // Scale
+		3
+}
+
 // Unmarshal unmarshals bh from src and returns the rest of src.
 func (bh *blockHeader) Unmarshal(src []byte) ([]byte, error) {
 	if len(src) < marshaledBlockHeaderSize {
@@ -287,4 +301,18 @@ func unmarshalBlockHeaders(dst []blockHeader, src []byte, blockHeadersCount int)
 	}
 
 	return dst, nil
+}
+
+type BlockHeaders []*blockHeader
+
+func (arr BlockHeaders) Len() int {
+	return len(arr)
+}
+
+func (arr BlockHeaders) Less(i, j int) bool {
+	return arr[i].TSID.Less(&arr[j].TSID)
+}
+
+func (arr BlockHeaders) Swap(i, j int) {
+	arr[i], arr[j] = arr[j], arr[i]
 }
