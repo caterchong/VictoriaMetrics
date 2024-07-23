@@ -1390,7 +1390,7 @@ func filterLabelValues(accountID, projectID uint32, lvs []string, tf *tagFilter,
 	var b []byte
 	result := lvs[:0]
 	for _, lv := range lvs {
-		b = marshalCommonPrefix(b[:0], nsPrefixTagToMetricIDs, accountID, projectID)
+		b = marshalCommonPrefix(b[:0], NsPrefixTagToMetricIDs, accountID, projectID)
 		b = marshalTagValue(b, bytesutil.ToUnsafeBytes(key))
 		b = marshalTagValue(b, bytesutil.ToUnsafeBytes(lv))
 		ok, err := tf.match(b)

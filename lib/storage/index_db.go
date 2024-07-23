@@ -2887,15 +2887,15 @@ func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricNa
 	ii := getIndexItems()
 	defer putIndexItems(ii)
 
-	ii.B = marshalCommonPrefix(ii.B, NsPrefixDateToMetricID, mn.AccountID, mn.ProjectID)  // 索引 5
-	ii.B = encoding.MarshalUint64(ii.B, date) // 8 字节代表的日期
+	ii.B = marshalCommonPrefix(ii.B, NsPrefixDateToMetricID, mn.AccountID, mn.ProjectID) // 索引 5
+	ii.B = encoding.MarshalUint64(ii.B, date)                                            // 8 字节代表的日期
 	ii.B = encoding.MarshalUint64(ii.B, tsid.MetricID)
 	ii.Next()
 
 	// Create metricName -> TSID entry.
 	//
 	// Do not use marshalCommonPrefix() here, since mn already contains (AccountID, ProjectID)
-	ii.B = append(ii.B, NsPrefixDateMetricNameToTSID)  // 索引 7
+	ii.B = append(ii.B, NsPrefixDateMetricNameToTSID) // 索引 7
 	ii.B = encoding.MarshalUint64(ii.B, date)
 	ii.B = mn.Marshal(ii.B)
 	ii.B = append(ii.B, kvSeparatorChar)
@@ -2904,7 +2904,7 @@ func (is *indexSearch) createPerDayIndexes(date uint64, tsid *TSID, mn *MetricNa
 
 	// Create per-day tag -> metricID entries for every tag in mn.
 	kb := kbPool.Get()
-	kb.B = marshalCommonPrefix(kb.B[:0], nsPrefixDateTagToMetricIDs, mn.AccountID, mn.ProjectID)
+	kb.B = marshalCommonPrefix(kb.B[:0], NsPrefixDateTagToMetricIDs, mn.AccountID, mn.ProjectID)
 	kb.B = encoding.MarshalUint64(kb.B, date)
 	ii.registerTagIndexes(kb.B, mn, tsid.MetricID)
 	kbPool.Put(kb)

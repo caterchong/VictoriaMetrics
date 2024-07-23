@@ -49,8 +49,8 @@ func mergePartsInternalForFile(dstPartPath string, bsw *blockStreamWriter,
 	bsrs []*blockStreamReader,
 	stopCh <-chan struct{}, retentionDeadline int64) (*partHeader, error) {
 	var ph partHeader
-	var rowsMerged uint64
-	var rowsDeleted uint64
+	var rowsMerged atomic.Uint64
+	var rowsDeleted atomic.Uint64
 	//retentionDeadline := time.Now().UnixMilli() - 1000*60*60*24*365*50 // 50 年
 	err := mergeBlockStreamsForFile(&ph, bsw, bsrs, stopCh, retentionDeadline, &rowsMerged, &rowsDeleted)
 	if err != nil {
@@ -66,7 +66,7 @@ func mergePartsInternalForFile(dstPartPath string, bsw *blockStreamWriter,
 
 func mergeBlockStreamsForFile(ph *partHeader, bsw *blockStreamWriter, bsrs []*blockStreamReader,
 	stopCh <-chan struct{}, retentionDeadline int64,
-	rowsMerged, rowsDeleted *uint64) error {
+	rowsMerged *atomic.Uint64, rowsDeleted *atomic.Uint64) error {
 	ph.Reset()
 
 	bsm := bsmPool.Get().(*blockStreamMerger)
@@ -82,7 +82,7 @@ func mergeBlockStreamsForFile(ph *partHeader, bsw *blockStreamWriter, bsrs []*bl
 }
 
 func mergeBlockStreamsInternalForFile(ph *partHeader, bsw *blockStreamWriter, bsm *blockStreamMerger,
-	stopCh <-chan struct{}, rowsMerged, rowsDeleted *uint64) error {
+	stopCh <-chan struct{}, rowsMerged, rowsDeleted *atomic.Uint64) error {
 	pendingBlockIsEmpty := true
 	pendingBlock := getBlock()
 	defer putBlock(pendingBlock)
@@ -104,7 +104,7 @@ func mergeBlockStreamsInternalForFile(ph *partHeader, bsw *blockStreamWriter, bs
 		retentionDeadline := bsm.getRetentionDeadline(&b.bh)
 		if b.bh.MaxTimestamp < retentionDeadline {
 			// Skip blocks out of the given retention.
-			atomic.AddUint64(rowsDeleted, uint64(b.bh.RowsCount))
+			rowsDeleted.Add(uint64(b.bh.RowsCount))
 			continue
 		}
 		if pendingBlockIsEmpty {

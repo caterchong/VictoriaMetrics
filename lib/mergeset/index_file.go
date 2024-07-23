@@ -634,14 +634,14 @@ func (t *TagIndex) UnmarshalFromTag(data []byte) (err error) {
 		t.MetricGroup = data[:idx]
 		data = data[idx+1:]
 	case 0xfe: //  MetricGroup + Tag -> MetricID
-		var n uint64
-		data, n, err = encoding.UnmarshalVarUint64(data)
-		if err != nil {
+		var nsize int
+		_, nsize = encoding.UnmarshalVarUint64(data)
+		if nsize <= 0 {
 			err = fmt.Errorf("not found metric group len, err=%w", err)
 			return
 		}
-		t.MetricGroup = data[:n]
-		data = data[n:]
+		t.MetricGroup = data[:nsize]
+		data = data[nsize:]
 		data, err = t.parseKV(data)
 		if err != nil {
 			return
@@ -703,11 +703,12 @@ func GetTableSearchFromDirs(dirs []string) *TableSearch {
 	pws := make([]*partWrapper, 0, len(dirs))
 	for _, dir := range dirs {
 		p := mustOpenFilePart(dir)
-		pws = append(pws, &partWrapper{
-			p:        p,
-			mp:       nil,
-			refCount: 1,
-		})
+		pw := &partWrapper{
+			p:  p,
+			mp: nil,
+		}
+		pw.incRef()
+		pws = append(pws, pw)
 	}
 
 	ts := &TableSearch{}

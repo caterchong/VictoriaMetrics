@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
@@ -82,7 +83,7 @@ func mergePartsInternal(dstPartPath string, bsw *blockStreamWriter, bsrs []*bloc
 	prepareBlock PrepareBlockCallback,
 	indexChecker IndexChecker) error {
 	var ph partHeader
-	var itemsMerged uint64
+	var itemsMerged atomic.Uint64
 	stopCh := make(chan struct{})
 	err := mergeBlockStreamsWithChecker(&ph, bsw, bsrs, prepareBlock, stopCh, &itemsMerged, indexChecker)
 	if err != nil {
@@ -97,7 +98,7 @@ func mergeBlockStreamsWithChecker(ph *partHeader, bsw *blockStreamWriter,
 	bsrs []*blockStreamReader,
 	prepareBlock PrepareBlockCallback,
 	stopCh <-chan struct{},
-	itemsMerged *uint64, indexChecker IndexChecker) error {
+	itemsMerged *atomic.Uint64, indexChecker IndexChecker) error {
 	bsm := bsmPool.Get().(*blockStreamMerger)
 	if err := bsm.Init(bsrs, prepareBlock); err != nil {
 		return fmt.Errorf("cannot initialize blockStreamMerger: %w", err)

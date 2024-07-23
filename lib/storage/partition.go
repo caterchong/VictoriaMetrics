@@ -245,7 +245,7 @@ func mustOpenPartition(smallPartsPath, bigPartsPath string, s *Storage) *partiti
 		logger.Panicf("FATAL: partition name in bigPartsPath %q doesn't match smallPartsPath %q; want %q", bigPartsPath, smallPartsPath, name)
 	}
 
-	partsFile := filepath.Join(smallPartsPath, partsFilename)
+	partsFile := filepath.Join(smallPartsPath, PartsFilename)
 	partNamesSmall, partNamesBig := mustReadPartNames(partsFile, smallPartsPath, bigPartsPath)
 
 	smallParts := mustOpenParts(partsFile, smallPartsPath, partNamesSmall)
@@ -2032,7 +2032,7 @@ func mustWritePartNames(pwsSmall, pwsBig []*partWrapper, dstDir string) {
 	if err != nil {
 		logger.Panicf("BUG: cannot marshal partNames to JSON: %s", err)
 	}
-	partsFile := filepath.Join(dstDir, partsFilename)
+	partsFile := filepath.Join(dstDir, PartsFilename)
 	fs.MustWriteAtomic(partsFile, data, true)
 }
 

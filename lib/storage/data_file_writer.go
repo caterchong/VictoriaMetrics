@@ -424,7 +424,7 @@ func (m *TsidDataMap) MergeTsidBySameScale(accountID, projectID uint32, metricID
 	defer putBlock(target)
 	//curScale := arr[0].BlockHeader.Scale
 	target.Init(&arr[0].BlockHeader.TSID, nil, nil, arr[0].BlockHeader.Scale, arr[0].BlockHeader.PrecisionBits)
-	var rowsDeleted uint64
+	var rowsDeleted atomic.Uint64
 	i := 0
 	total := 0
 	for ; i < len(arr)-len(arr)%2; i += 2 {
@@ -488,8 +488,8 @@ func (m *TsidDataMap) MergeTsidBySameScale(accountID, projectID uint32, metricID
 		total++
 		//writer.WriteRaw(&arr[i].BlockHeader, arr[i].PartInstance.timestampsFile.(*fs.ReaderAt), arr[i].PartInstance.valuesFile.(*fs.ReaderAt))
 	}
-	if rowsDeleted > 0 {
-		logger.Infof("rows deleted:%d", rowsDeleted)
+	if rowsDeleted.Load() > 0 {
+		logger.Infof("rows deleted:%d", rowsDeleted.Load())
 	}
 	if total != len(arr) {
 		logger.Panicf("total=%d", total)

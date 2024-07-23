@@ -323,7 +323,7 @@ func (mw *MultiIndexWriter) Write(data []byte) {
 	indexType := data[0]
 	ib, ok := mw.Indexes[indexType]
 	if !ok {
-		ib = getInmemoryBlock()
+		ib = &inmemoryBlock{}
 		mw.Indexes[indexType] = ib
 	}
 	if ib.Add(data) {
@@ -343,7 +343,6 @@ func (mw *MultiIndexWriter) Close() {
 		}
 		mw.Writer.WriteUnsortedBlock(ib)
 		ib.Reset()
-		putInmemoryBlock(ib)
 	}
 	mw.Writer.MustClose()
 }

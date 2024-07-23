@@ -9,7 +9,6 @@ import (
 	"unsafe"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/blockcache"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/filestream"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs"
@@ -129,25 +128,6 @@ func NewPartReader(path string, tableType int8) (*PartReader, error) {
 func (p *PartReader) Close() {
 	p.ItemsFile.MustClose()
 	p.LensFile.MustClose()
-}
-
-func (p *PartReader) readInmemoryBlock(bh *blockHeader) (*inmemoryBlock, error) { // 从磁盘读取一个块  // todo: ib 应该要放在 cache 里面
-	p.sb.Reset()
-	var sb storageBlock
-	sb.Reset()
-	p.sb.itemsData = bytesutil.ResizeNoCopyMayOverallocate(p.sb.itemsData, int(bh.itemsBlockSize))
-	sb.itemsData = p.ItemsFile.ReadAtNocopy(p.sb.itemsData, int64(bh.itemsBlockOffset)) // 直接使用 mmap 的内存，减少拷贝
-	p.sb.lensData = bytesutil.ResizeNoCopyMayOverallocate(p.sb.lensData, int(bh.lensBlockSize))
-	sb.lensData = p.LensFile.ReadAtNocopy(p.sb.lensData, int64(bh.lensBlockOffset))
-	ib := getInmemoryBlock()
-	if err := ib.UnmarshalData(&sb, bh.firstItem, bh.commonPrefix, bh.itemsCount, bh.marshalType); err != nil {
-		sb.itemsData = nil
-		sb.lensData = nil
-		return nil, fmt.Errorf("cannot unmarshal storage block with %d items: %w", bh.itemsCount, err)
-	}
-	sb.itemsData = nil
-	sb.lensData = nil
-	return ib, nil
 }
 
 func mustOpenFilePart(path string) *part {

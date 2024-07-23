@@ -226,14 +226,13 @@ func ParseTagIndex(data []byte, out *TagIndex) (err error) { // 索引 1 的格�
 	case 0xfe:
 		// metricGroupName + tag -> metric id
 		data = data[1:]
-		var nameLen uint64
-		data, nameLen, err = encoding.UnmarshalVarUint64(data)
-		if err != nil {
-			err = fmt.Errorf("name len error(index 3/fe), err=%w", err)
+		_, nsize := encoding.UnmarshalVarUint64(data)
+		if nsize <= 0 {
+			err = fmt.Errorf("name len error(index 3/fe)")
 			return
 		}
-		out.MetricGroupName = data[:nameLen]
-		data = data[nameLen:]
+		out.MetricGroupName = data[:nsize]
+		data = data[nsize:]
 		idx := bytes.IndexByte(data, 1)
 		if idx < 0 {
 			err = fmt.Errorf("not found tag key(index 3/fe)")
